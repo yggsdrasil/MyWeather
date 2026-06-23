@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Adobe Target · MCP Client</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">A</span>
+        <div class="brand-text">
+          <h1>Adobe Target <span class="brand-sub">MCP Client</span></h1>
+          <p id="server-url" class="server-url">connecting…</p>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <span id="status-badge" class="badge badge-idle">Disconnected</span>
+        <button id="connect-btn" class="btn btn-primary">Connect</button>
+        <button id="logout-btn" class="btn btn-ghost hidden">Sign out</button>
+      </div>
+    </header>
+
+    <div id="toast" class="toast hidden"></div>
+
+    <main class="layout">
+      <!-- Pre-connection / auth panel -->
+      <section id="welcome" class="welcome">
+        <div class="welcome-card">
+          <h2>Connect to Adobe Target</h2>
+          <p>
+            This app talks to Adobe Target through Adobe's
+            <strong>Model Context Protocol (MCP)</strong> server. Click
+            <em>Connect</em> to sign in with your Adobe Experience Cloud
+            account. Authentication uses Adobe IMS OAuth 2.0 — no static
+            credentials are stored by Adobe.
+          </p>
+          <ol class="steps">
+            <li>Click <strong>Connect</strong>.</li>
+            <li>Authorize with Adobe IMS in the popup / new tab.</li>
+            <li>
+              Browse the available tools and run experimentation &amp;
+              personalization queries.
+            </li>
+          </ol>
+          <div id="auth-action" class="auth-action hidden">
+            <p>Authorization is required to continue.</p>
+            <a id="authorize-link" class="btn btn-primary" target="_blank" rel="noopener"
+              >Authorize with Adobe</a
+            >
+          </div>
+          <p class="role-note">
+            Access is governed by your Adobe Target role: Observer (read),
+            Editor (read + write), Approver (activate / deactivate).
+          </p>
+        </div>
+      </section>
+
+      <!-- Connected workspace -->
+      <section id="workspace" class="workspace hidden">
+        <aside class="sidebar">
+          <div class="sidebar-head">
+            <input
+              id="tool-search"
+              type="search"
+              class="search"
+              placeholder="Search tools…"
+              autocomplete="off"
+            />
+            <span id="tool-count" class="tool-count"></span>
+          </div>
+          <nav id="tool-list" class="tool-list"></nav>
+        </aside>
+
+        <section class="detail">
+          <div id="detail-empty" class="detail-empty">
+            <p>Select a tool from the left to inspect its parameters and run it.</p>
+          </div>
+
+          <div id="detail-content" class="detail-content hidden">
+            <div class="detail-header">
+              <div>
+                <span id="detail-category" class="chip"></span>
+                <h2 id="detail-name"></h2>
+              </div>
+              <button id="run-btn" class="btn btn-primary">Run tool</button>
+            </div>
+            <p id="detail-description" class="detail-description"></p>
+
+            <div class="tabs">
+              <button class="tab active" data-mode="form">Form</button>
+              <button class="tab" data-mode="json">Raw JSON</button>
+            </div>
+
+            <form id="param-form" class="param-form"></form>
+            <textarea
+              id="param-json"
+              class="param-json hidden"
+              spellcheck="false"
+            ></textarea>
+
+            <div class="result-block">
+              <div class="result-head">
+                <h3>Result</h3>
+                <span id="result-status" class="result-status"></span>
+              </div>
+              <div id="result-body" class="result-body">
+                <p class="muted">Run the tool to see results here.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <span
+        >Unofficial client for the Adobe Target MCP server
+        (<code id="footer-server">targetmcp.adobe.io</code>). Provided “as is”.</span
+      >
+    </footer>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
