@@ -7,6 +7,7 @@ import express, {
 import { config, PROJECT_ROOT } from "./config.js";
 import { logger } from "./logger.js";
 import { mcpClient, ConnectionRequiredError } from "./mcpClient.js";
+import { runAgent, type ChatMessage } from "./agent.js";
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
@@ -41,6 +42,56 @@ app.get("/api/config", (_req, res) => {
 app.get("/api/status", (_req, res) => {
   res.json(mcpClient.status());
 });
+
+app.get("/api/agent/status", (_req, res) => {
+  res.json({
+    available: config.llm.enabled,
+    provider: config.llm.provider,
+    model: config.llm.enabled ? config.llm.model : null,
+  });
+});
+
+/**
+ * Natural-language assistant endpoint. Accepts the full chat history and runs
+ * the agentic tool-calling loop against the Adobe Target MCP server.
+ */
+app.post(
+  "/api/chat",
+  asyncHandler(async (req, res) => {
+    if (!config.llm.enabled) {
+      res.status(400).json({
+        error:
+          "AI assistant is not configured. Set ANTHROPIC_API_KEY or OPENAI_API_KEY and restart the server.",
+      });
+      return;
+    }
+    if (!mcpClient.status().connected) {
+      res.status(409).json({
+        error: "Connect to the Adobe Target MCP server before using the assistant.",
+      });
+      return;
+    }
+
+    const rawMessages = req.body?.messages;
+    if (!Array.isArray(rawMessages) || rawMessages.length === 0) {
+      res.status(400).json({ error: "A non-empty 'messages' array is required." });
+      return;
+    }
+
+    const history: ChatMessage[] = rawMessages
+      .filter(
+        (m: unknown): m is ChatMessage =>
+          !!m &&
+          typeof (m as ChatMessage).content === "string" &&
+          ((m as ChatMessage).role === "user" ||
+            (m as ChatMessage).role === "assistant"),
+      )
+      .map((m) => ({ role: m.role, content: m.content }));
+
+    const result = await runAgent(history);
+    res.json(result);
+  }),
+);
 
 /**
  * Initiates a connection to the MCP server. If authorization is needed, the

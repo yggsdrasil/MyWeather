@@ -132,6 +132,19 @@ class McpClientManager {
     return this.client;
   }
 
+  /** Returns the raw, flat tool list (name/description/inputSchema) for the agent. */
+  async getRawTools(): Promise<
+    Array<{ name: string; description: string; inputSchema: unknown }>
+  > {
+    const { tools } = await this.requireClient().listTools();
+    this.cachedToolCount = tools.length;
+    return tools.map((t) => ({
+      name: t.name,
+      description: t.description ?? "",
+      inputSchema: t.inputSchema,
+    }));
+  }
+
   async listTools(): Promise<ToolCatalogGroup[]> {
     const { tools } = await this.requireClient().listTools();
     this.cachedToolCount = tools.length;

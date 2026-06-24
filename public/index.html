@@ -64,6 +64,88 @@
 
       <!-- Connected workspace -->
       <section id="workspace" class="workspace hidden">
+        <div class="view-tabs">
+          <button id="tab-assistant" class="view-tab active" data-view="assistant">
+            Assistant
+          </button>
+          <button id="tab-tools" class="view-tab" data-view="tools">Tools</button>
+          <span id="agent-model" class="agent-model"></span>
+        </div>
+
+        <!-- Assistant (chat) view -->
+        <div id="assistant-view" class="assistant-view">
+          <div id="chat-log" class="chat-log">
+            <div id="chat-empty" class="chat-empty">
+              <h2>Ask the Adobe Target assistant</h2>
+              <p>
+                Ask in plain language — the assistant calls Adobe Target MCP
+                tools to fetch real data and summarizes the results.
+              </p>
+              <div class="prompt-grid" id="prompt-grid">
+                <button class="prompt-chip" type="button">
+                  <span class="prompt-goal">Experiment status audit</span>
+                  What A/B tests are currently active on the homepage? Show me
+                  status, traffic allocation, and how long each has been running.
+                </button>
+                <button class="prompt-chip" type="button">
+                  <span class="prompt-goal">Performance review</span>
+                  Show me all active tests that have reached statistical
+                  significance — which experiences are winning?
+                </button>
+                <button class="prompt-chip" type="button">
+                  <span class="prompt-goal">Revenue analysis</span>
+                  Get the orders and revenue report for activity AT4821 and
+                  summarize which experience is driving the most revenue per
+                  visitor.
+                </button>
+                <button class="prompt-chip" type="button">
+                  <span class="prompt-goal">A4T reporting</span>
+                  Pull the A4T report for my checkout optimization test and
+                  summarize the Analytics-side conversion data.
+                </button>
+                <button class="prompt-chip" type="button">
+                  <span class="prompt-goal">Activity insights</span>
+                  Get insights for my "Summer Sale Banner" test — what does
+                  performance look like and are there any anomalies?
+                </button>
+                <button class="prompt-chip" type="button">
+                  <span class="prompt-goal">Audience management</span>
+                  List all audiences targeting mobile users and show me which
+                  activities they're associated with.
+                </button>
+                <button class="prompt-chip" type="button">
+                  <span class="prompt-goal">QA and preview</span>
+                  Generate QA preview URLs for activity 12345 so I can review all
+                  variants before activating.
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div id="assistant-disabled" class="assistant-disabled hidden">
+            <p>
+              The AI assistant is not configured. Set an
+              <code>ANTHROPIC_API_KEY</code> or <code>OPENAI_API_KEY</code> in
+              your <code>.env</code> file and restart the server. You can still
+              use the <strong>Tools</strong> tab to run tools manually.
+            </p>
+          </div>
+
+          <form id="chat-form" class="chat-composer">
+            <textarea
+              id="chat-input"
+              class="chat-input"
+              rows="1"
+              placeholder="Ask about your Adobe Target activities, reports, audiences…"
+            ></textarea>
+            <button id="chat-send" class="btn btn-primary" type="submit">
+              Send
+            </button>
+          </form>
+        </div>
+
+        <!-- Tools (manual) view -->
+        <div id="tools-view" class="tools-view hidden">
         <aside class="sidebar">
           <div class="sidebar-head">
             <input
@@ -116,6 +198,8 @@
             </div>
           </div>
         </section>
+        </div>
+        <!-- /tools-view -->
       </section>
     </main>
 

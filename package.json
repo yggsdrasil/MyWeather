@@ -10,7 +10,8 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server/index.js",
     "dev": "tsx watch src/server/index.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node scripts/agent-itest.mjs anthropic && node scripts/agent-itest.mjs openai"
   },
   "keywords": [
     "adobe-target",

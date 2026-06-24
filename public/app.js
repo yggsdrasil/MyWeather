@@ -25,12 +25,28 @@ const els = {
   resultStatus: document.getElementById("result-status"),
   toast: document.getElementById("toast"),
   tabs: document.querySelectorAll(".tab"),
+  // Assistant / chat
+  viewTabs: document.querySelectorAll(".view-tab"),
+  assistantView: document.getElementById("assistant-view"),
+  toolsView: document.getElementById("tools-view"),
+  agentModel: document.getElementById("agent-model"),
+  chatLog: document.getElementById("chat-log"),
+  chatEmpty: document.getElementById("chat-empty"),
+  promptGrid: document.getElementById("prompt-grid"),
+  assistantDisabled: document.getElementById("assistant-disabled"),
+  chatForm: document.getElementById("chat-form"),
+  chatInput: document.getElementById("chat-input"),
+  chatSend: document.getElementById("chat-send"),
 };
 
 const state = {
   groups: [],
   selected: null, // currently selected tool object
   mode: "form", // "form" | "json"
+  view: "assistant", // "assistant" | "tools"
+  agent: { available: false, model: null },
+  messages: [], // [{ role, content }]
+  sending: false,
 };
 
 // --------------------------------------------------------------------------
@@ -154,9 +170,13 @@ async function logout() {
     const data = await api("/api/logout", { method: "POST" });
     state.groups = [];
     state.selected = null;
+    state.messages = [];
     els.toolList.innerHTML = "";
     els.detailContent.classList.add("hidden");
     els.detailEmpty.classList.remove("hidden");
+    // Clear chat history except the empty-state prompt grid.
+    els.chatLog.querySelectorAll(".msg").forEach((m) => m.remove());
+    els.chatEmpty.classList.remove("hidden");
     renderStatus(data.status);
     toast("Signed out and cleared credentials.", "info");
   } catch (err) {
@@ -548,6 +568,279 @@ function renderTextBlock(container, text) {
 }
 
 // --------------------------------------------------------------------------
+// View switching (Assistant / Tools)
+// --------------------------------------------------------------------------
+function switchView(view) {
+  state.view = view;
+  els.viewTabs.forEach((t) =>
+    t.classList.toggle("active", t.dataset.view === view),
+  );
+  els.assistantView.classList.toggle("hidden", view !== "assistant");
+  els.toolsView.classList.toggle("hidden", view !== "tools");
+}
+
+// --------------------------------------------------------------------------
+// Assistant / chat
+// --------------------------------------------------------------------------
+async function initAgent() {
+  try {
+    const data = await api("/api/agent/status");
+    state.agent = data;
+    if (data.available) {
+      els.agentModel.textContent = `${data.provider} · ${data.model}`;
+      els.assistantDisabled.classList.add("hidden");
+      els.chatForm.classList.remove("hidden");
+      els.chatInput.disabled = false;
+      els.chatSend.disabled = false;
+    } else {
+      els.agentModel.textContent = "assistant not configured";
+      els.assistantDisabled.classList.remove("hidden");
+      els.chatForm.classList.add("hidden");
+    }
+  } catch (_) {
+    state.agent = { available: false, model: null };
+  }
+  // Default to the assistant when it's available, otherwise the tools browser.
+  switchView(state.agent.available ? "assistant" : "tools");
+}
+
+function autosizeInput() {
+  els.chatInput.style.height = "auto";
+  els.chatInput.style.height = `${Math.min(els.chatInput.scrollHeight, 160)}px`;
+}
+
+function appendMessage(role, content) {
+  els.chatEmpty.classList.add("hidden");
+  const wrap = document.createElement("div");
+  wrap.className = `msg msg-${role}`;
+  const label = document.createElement("div");
+  label.className = "msg-role";
+  label.textContent = role === "user" ? "You" : "Assistant";
+  const bubble = document.createElement("div");
+  bubble.className = "bubble";
+  if (role === "assistant") {
+    bubble.innerHTML = renderMarkdown(content);
+  } else {
+    bubble.textContent = content;
+  }
+  wrap.appendChild(label);
+  wrap.appendChild(bubble);
+  els.chatLog.appendChild(wrap);
+  els.chatLog.scrollTop = els.chatLog.scrollHeight;
+  return { wrap, bubble };
+}
+
+function appendTrace(bubble, steps) {
+  if (!steps || !steps.length) return;
+  const details = document.createElement("details");
+  details.className = "trace";
+  const summary = document.createElement("summary");
+  summary.textContent = `${steps.length} tool call${steps.length > 1 ? "s" : ""}`;
+  details.appendChild(summary);
+  for (const step of steps) {
+    const row = document.createElement("div");
+    row.className = "trace-step";
+    const dot = document.createElement("span");
+    dot.className = `dot ${step.ok ? "ok" : "err"}`;
+    dot.textContent = step.ok ? "●" : "✕";
+    const name = document.createElement("span");
+    name.className = "tcall";
+    name.textContent = step.name;
+    const args = document.createElement("span");
+    args.className = "targs";
+    const argStr = JSON.stringify(step.args || {});
+    args.textContent = argStr === "{}" ? "" : argStr;
+    row.appendChild(dot);
+    row.appendChild(name);
+    row.appendChild(args);
+    details.appendChild(row);
+  }
+  bubble.appendChild(details);
+}
+
+async function sendChat(text) {
+  const message = (text ?? els.chatInput.value).trim();
+  if (!message || state.sending) return;
+  if (!state.agent.available) {
+    toast("AI assistant is not configured.", "error");
+    return;
+  }
+
+  state.sending = true;
+  els.chatSend.disabled = true;
+  els.chatInput.value = "";
+  autosizeInput();
+
+  state.messages.push({ role: "user", content: message });
+  appendMessage("user", message);
+
+  // Pending assistant bubble with typing indicator.
+  const pending = appendMessage("assistant", "");
+  pending.bubble.innerHTML =
+    '<div class="typing"><span></span><span></span><span></span></div>';
+
+  try {
+    const data = await api("/api/chat", {
+      method: "POST",
+      body: JSON.stringify({ messages: state.messages }),
+    });
+    pending.bubble.innerHTML = renderMarkdown(data.reply || "(no response)");
+    appendTrace(pending.bubble, data.steps);
+    state.messages.push({ role: "assistant", content: data.reply || "" });
+    els.chatLog.scrollTop = els.chatLog.scrollHeight;
+  } catch (err) {
+    pending.bubble.innerHTML = "";
+    const errDiv = document.createElement("div");
+    errDiv.style.color = "var(--accent)";
+    errDiv.textContent = `Error: ${err.message}`;
+    pending.bubble.appendChild(errDiv);
+    toast(err.message, "error", 7000);
+  } finally {
+    state.sending = false;
+    els.chatSend.disabled = false;
+    els.chatInput.focus();
+  }
+}
+
+// --------------------------------------------------------------------------
+// Minimal, safe markdown renderer (escape first, then format)
+// --------------------------------------------------------------------------
+function escapeHtml(s) {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function renderInline(s) {
+  return s
+    .replace(/`([^`]+)`/g, (_, c) => `<code>${c}</code>`)
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>")
+    .replace(
+      /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+      '<a href="$2" target="_blank" rel="noopener">$1</a>',
+    )
+    .replace(
+      /(^|[\s(])((https?:\/\/)[^\s)]+)(?=$|[\s).,])/g,
+      '$1<a href="$2" target="_blank" rel="noopener">$2</a>',
+    );
+}
+
+function renderMarkdown(md) {
+  const src = escapeHtml(md || "");
+  const lines = src.split("\n");
+  let html = "";
+  let i = 0;
+
+  const flushParagraph = (buf) => {
+    if (buf.length) html += `<p>${renderInline(buf.join(" "))}</p>`;
+    return [];
+  };
+
+  let para = [];
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // Fenced code block
+    if (/^```/.test(line.trim())) {
+      para = flushParagraph(para);
+      const code = [];
+      i++;
+      while (i < lines.length && !/^```/.test(lines[i].trim())) {
+        code.push(lines[i]);
+        i++;
+      }
+      i++;
+      html += `<pre><code>${code.join("\n")}</code></pre>`;
+      continue;
+    }
+
+    // Table (header row followed by a separator row of dashes/pipes)
+    if (
+      line.includes("|") &&
+      i + 1 < lines.length &&
+      /^\s*\|?[\s:|-]+\|?\s*$/.test(lines[i + 1]) &&
+      lines[i + 1].includes("-")
+    ) {
+      para = flushParagraph(para);
+      const parseRow = (r) =>
+        r
+          .trim()
+          .replace(/^\||\|$/g, "")
+          .split("|")
+          .map((c) => c.trim());
+      const headers = parseRow(line);
+      i += 2;
+      const rows = [];
+      while (i < lines.length && lines[i].includes("|")) {
+        rows.push(parseRow(lines[i]));
+        i++;
+      }
+      let t = "<table><thead><tr>";
+      headers.forEach((h) => (t += `<th>${renderInline(h)}</th>`));
+      t += "</tr></thead><tbody>";
+      rows.forEach((r) => {
+        t += "<tr>";
+        r.forEach((c) => (t += `<td>${renderInline(c)}</td>`));
+        t += "</tr>";
+      });
+      t += "</tbody></table>";
+      html += t;
+      continue;
+    }
+
+    // Headings
+    const h = line.match(/^(#{1,3})\s+(.*)$/);
+    if (h) {
+      para = flushParagraph(para);
+      const level = h[1].length;
+      html += `<h${level}>${renderInline(h[2])}</h${level}>`;
+      i++;
+      continue;
+    }
+
+    // Unordered list
+    if (/^\s*[-*]\s+/.test(line)) {
+      para = flushParagraph(para);
+      let list = "<ul>";
+      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) {
+        list += `<li>${renderInline(lines[i].replace(/^\s*[-*]\s+/, ""))}</li>`;
+        i++;
+      }
+      list += "</ul>";
+      html += list;
+      continue;
+    }
+
+    // Ordered list
+    if (/^\s*\d+\.\s+/.test(line)) {
+      para = flushParagraph(para);
+      let list = "<ol>";
+      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
+        list += `<li>${renderInline(lines[i].replace(/^\s*\d+\.\s+/, ""))}</li>`;
+        i++;
+      }
+      list += "</ol>";
+      html += list;
+      continue;
+    }
+
+    // Blank line ends a paragraph
+    if (line.trim() === "") {
+      para = flushParagraph(para);
+      i++;
+      continue;
+    }
+
+    para.push(line.trim());
+    i++;
+  }
+  flushParagraph(para);
+  return html;
+}
+
+// --------------------------------------------------------------------------
 // Auth redirect handling
 // --------------------------------------------------------------------------
 function handleAuthRedirect() {
@@ -574,5 +867,37 @@ els.tabs.forEach((t) =>
   t.addEventListener("click", () => setMode(t.dataset.mode)),
 );
 
+// View tabs (Assistant / Tools)
+els.viewTabs.forEach((t) =>
+  t.addEventListener("click", () => switchView(t.dataset.view)),
+);
+
+// Chat composer
+els.chatForm.addEventListener("submit", (e) => {
+  e.preventDefault();
+  sendChat();
+});
+els.chatInput.addEventListener("input", autosizeInput);
+els.chatInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    sendChat();
+  }
+});
+
+// Example prompt chips: fill the input and send immediately.
+els.promptGrid.querySelectorAll(".prompt-chip").forEach((chip) => {
+  chip.addEventListener("click", () => {
+    // Use only the prompt text, not the category label.
+    const goal = chip.querySelector(".prompt-goal");
+    const text = chip.textContent
+      .replace(goal ? goal.textContent : "", "")
+      .replace(/\s+/g, " ")
+      .trim();
+    sendChat(text);
+  });
+});
+
 handleAuthRedirect();
+initAgent();
 refreshStatus();
