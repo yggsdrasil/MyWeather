@@ -102,9 +102,11 @@ ANTHROPIC_API_KEY=sk-ant-...
 OPENAI_API_KEY=sk-...
 ```
 
-Optional overrides: `LLM_PROVIDER` (`anthropic` | `openai`), `LLM_MODEL`,
-`LLM_BASE_URL` (for OpenAI-compatible/proxy endpoints), `LLM_MAX_STEPS`,
-`LLM_MAX_TOKENS`. See `.env.example`. Your prompts and the Target data the tools
+Optional overrides: `LLM_PROVIDER` (`anthropic` | `openai`), `LLM_MODEL`
+(Anthropic default `claude-sonnet-4-6`; also `claude-opus-4-8`,
+`claude-haiku-4-5`. OpenAI default `gpt-4o`), `LLM_BASE_URL` (for
+OpenAI-compatible/proxy endpoints), `LLM_MAX_STEPS`, `LLM_MAX_TOKENS`. See
+`.env.example`. Your prompts and the Target data the tools
 return are sent to the configured LLM provider, so use a key/model you're
 comfortable sharing that data with.
 

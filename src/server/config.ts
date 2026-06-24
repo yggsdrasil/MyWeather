@@ -61,7 +61,7 @@ function resolveLlmConfig(): LlmConfig {
     genericKey || (provider === "anthropic" ? anthropicKey : openaiKey);
 
   const defaultModel =
-    provider === "anthropic" ? "claude-3-7-sonnet-latest" : "gpt-4o";
+    provider === "anthropic" ? "claude-sonnet-4-6" : "gpt-4o";
   const defaultBaseUrl =
     provider === "anthropic"
       ? process.env.ANTHROPIC_BASE_URL ?? "https://api.anthropic.com/v1"
