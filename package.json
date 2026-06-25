@@ -1,46 +1,35 @@
 {
-  "name": "myweather",
-  "version": "0.0.0",
-  "scripts": {
-    "ng": "ng",
-    "start": "ng serve",
-    "build": "ng build",
-    "test": "ng test",
-    "lint": "ng lint",
-    "e2e": "ng e2e"
+  "name": "adobe-target-mcp-client",
+  "version": "1.0.0",
+  "description": "A web application that connects to Adobe Target through Adobe's Model Context Protocol (MCP) server.",
+  "type": "module",
+  "engines": {
+    "node": ">=18.0.0"
   },
-  "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server/index.js",
+    "dev": "tsx watch src/server/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node scripts/agent-itest.mjs anthropic && node scripts/agent-itest.mjs openai"
+  },
+  "keywords": [
+    "adobe-target",
+    "mcp",
+    "model-context-protocol",
+    "experimentation",
+    "personalization"
+  ],
+  "license": "MIT",
   "dependencies": {
-    "@angular/animations": "~9.1.7",
-    "@angular/common": "~9.1.7",
-    "@angular/compiler": "~9.1.7",
-    "@angular/core": "~9.1.7",
-    "@angular/forms": "~9.1.7",
-    "@angular/platform-browser": "~9.1.7",
-    "@angular/platform-browser-dynamic": "~9.1.7",
-    "@angular/router": "~9.1.7",
-    "rxjs": "~6.5.4",
-    "tslib": "^1.10.0",
-    "zone.js": "~0.10.2"
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2"
   },
   "devDependencies": {
-    "@angular-devkit/build-angular": "~0.901.6",
-    "@angular/cli": "~9.1.6",
-    "@angular/compiler-cli": "~9.1.7",
-    "@types/node": "^12.11.1",
-    "@types/jasmine": "~3.5.0",
-    "@types/jasminewd2": "~2.0.3",
-    "codelyzer": "^5.1.2",
-    "jasmine-core": "~3.5.0",
-    "jasmine-spec-reporter": "~4.2.1",
-    "karma": "~5.0.0",
-    "karma-chrome-launcher": "~3.1.0",
-    "karma-coverage-istanbul-reporter": "~2.1.0",
-    "karma-jasmine": "~3.0.1",
-    "karma-jasmine-html-reporter": "^1.4.2",
-    "protractor": "~5.4.3",
-    "ts-node": "~8.3.0",
-    "tslint": "~6.1.0",
-    "typescript": "~3.8.3"
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
   }
 }
