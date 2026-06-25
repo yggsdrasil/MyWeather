@@ -36,6 +36,7 @@ const els = {
   chatForm: document.getElementById("chat-form"),
   chatInput: document.getElementById("chat-input"),
   chatSend: document.getElementById("chat-send"),
+  usageTotal: document.getElementById("usage-total"),
 };
 
 const state = {
@@ -49,6 +50,8 @@ const state = {
   messages: [], // [{ role, content }]
   sending: false,
   connecting: {}, // serverId -> bool
+  // Running session usage totals across all assistant queries.
+  session: { inputTokens: 0, outputTokens: 0, costUSD: 0, costKnown: true, queries: 0 },
 };
 
 // --------------------------------------------------------------------------
@@ -723,6 +726,75 @@ function appendMessage(role, content) {
   return { wrap, bubble };
 }
 
+// --------------------------------------------------------------------------
+// Usage & cost formatting
+// --------------------------------------------------------------------------
+function formatTokens(n) {
+  return (n || 0).toLocaleString();
+}
+
+function formatUSD(n) {
+  if (n == null) return "n/a";
+  if (n === 0) return "$0";
+  if (n < 0.01) return `$${n.toFixed(4)}`;
+  if (n < 1) return `$${n.toFixed(3)}`;
+  return `$${n.toFixed(2)}`;
+}
+
+function appendUsage(bubble, data) {
+  const usage = data.usage;
+  if (!usage) return;
+  const line = document.createElement("div");
+  line.className = "msg-usage";
+
+  const parts = [];
+  parts.push(`<span>${data.model || ""}</span>`);
+  parts.push('<span class="usage-sep">·</span>');
+  parts.push(
+    `<span>${formatTokens(usage.inputTokens)} in / ${formatTokens(usage.outputTokens)} out</span>`,
+  );
+  parts.push('<span class="usage-sep">·</span>');
+  parts.push(
+    `<span>${usage.llmCalls} call${usage.llmCalls === 1 ? "" : "s"}</span>`,
+  );
+  parts.push('<span class="usage-sep">·</span>');
+  if (data.cost) {
+    parts.push(
+      `<span class="usage-cost" title="Estimated at $${data.cost.rates.input}/$${data.cost.rates.output} per 1M input/output tokens">~${formatUSD(data.cost.totalUSD)}</span>`,
+    );
+  } else {
+    parts.push(
+      '<span title="No price configured for this model">cost n/a</span>',
+    );
+  }
+  line.innerHTML = parts.join(" ");
+  bubble.appendChild(line);
+}
+
+function updateSessionTotal(data) {
+  const s = state.session;
+  s.queries += 1;
+  if (data.usage) {
+    s.inputTokens += data.usage.inputTokens || 0;
+    s.outputTokens += data.usage.outputTokens || 0;
+  }
+  if (data.cost) s.costUSD += data.cost.totalUSD;
+  else s.costKnown = false;
+  renderSessionTotal();
+}
+
+function renderSessionTotal() {
+  const s = state.session;
+  if (!s.queries) {
+    els.usageTotal.textContent = "";
+    return;
+  }
+  const total = s.inputTokens + s.outputTokens;
+  const cost = s.costKnown ? `<b>~${formatUSD(s.costUSD)}</b>` : "cost n/a";
+  els.usageTotal.innerHTML = `session: ${formatTokens(total)} tok · ${cost}`;
+  els.usageTotal.title = `${s.queries} queries · ${formatTokens(s.inputTokens)} input + ${formatTokens(s.outputTokens)} output tokens`;
+}
+
 function appendTrace(bubble, steps) {
   if (!steps || !steps.length) return;
   const details = document.createElement("details");
@@ -779,6 +851,8 @@ async function sendChat(text) {
     });
     pending.bubble.innerHTML = renderMarkdown(data.reply || "(no response)");
     appendTrace(pending.bubble, data.steps);
+    appendUsage(pending.bubble, data);
+    updateSessionTotal(data);
     state.messages.push({ role: "assistant", content: data.reply || "" });
     els.chatLog.scrollTop = els.chatLog.scrollHeight;
   } catch (err) {

@@ -31,6 +31,9 @@ export interface LlmConfig {
   /** Max agent reasoning/tool-call iterations per user message. */
   maxSteps: number;
   maxTokens: number;
+  /** Optional USD-per-1M-token price overrides for cost estimates. */
+  priceInput?: number;
+  priceOutput?: number;
 }
 
 export interface McpServerConfig {
@@ -104,6 +107,13 @@ function resolveLlmConfig(): LlmConfig {
         process.env.LLM_BASE_URL ??
         "https://api.openai.com/v1";
 
+  const priceInput = process.env.LLM_PRICE_INPUT
+    ? Number.parseFloat(process.env.LLM_PRICE_INPUT)
+    : undefined;
+  const priceOutput = process.env.LLM_PRICE_OUTPUT
+    ? Number.parseFloat(process.env.LLM_PRICE_OUTPUT)
+    : undefined;
+
   return {
     enabled: Boolean(apiKey),
     provider,
@@ -112,6 +122,8 @@ function resolveLlmConfig(): LlmConfig {
     baseUrl: (process.env.LLM_BASE_URL ?? defaultBaseUrl).replace(/\/+$/, ""),
     maxSteps: Number.parseInt(process.env.LLM_MAX_STEPS ?? "10", 10),
     maxTokens: Number.parseInt(process.env.LLM_MAX_TOKENS ?? "2048", 10),
+    priceInput: Number.isFinite(priceInput) ? priceInput : undefined,
+    priceOutput: Number.isFinite(priceOutput) ? priceOutput : undefined,
   };
 }
 

@@ -11,8 +11,9 @@ Adobe IMS OAuth 2.0 authorization flow, the app discovers the tools each server
 exposes, and lets you work with them two ways:
 
 - **Assistant** — ask in plain language ("which homepage A/B tests are
-  winning?") and an AI agent calls the right Target MCP tools, reads the real
-  data, and summarizes the answer.
+  winning?") and an AI agent calls the right MCP tools, reads the real data, and
+  summarizes the answer. Each reply shows token usage and an estimated cost, with
+  a running session total in the header.
 - **Tools** — browse every tool each connected server exposes and run any of
   them manually with a form generated from its schema (switch between servers
   with the tabs at the top of the tool list).
@@ -125,6 +126,14 @@ OpenAI-compatible/proxy endpoints), `LLM_MAX_STEPS`, `LLM_MAX_TOKENS`. See
 return are sent to the configured LLM provider, so use a key/model you're
 comfortable sharing that data with.
 
+**Usage & cost.** Every assistant reply reports the tokens used and an estimated
+USD cost (input + output, summed across the agent's tool-calling round-trips),
+and the header keeps a running session total. Costs are computed from a built-in
+price table for known Anthropic/OpenAI models and are **estimates** (list price,
+excluding caching/batch discounts) — not your actual bill. If your model isn't
+recognized or your rates differ, set `LLM_PRICE_INPUT` / `LLM_PRICE_OUTPUT` (USD
+per 1,000,000 tokens) in `.env`.
+
 ## Running
 
 Development (auto-reload):
@@ -174,7 +183,7 @@ Server ids are `target` and `analytics`.
 | `POST /api/servers/:id/disconnect`  | Close a server's MCP session (keeps credentials).                    |
 | `POST /api/servers/:id/logout`      | Close a server's session and clear its stored credentials.           |
 | `GET  /api/agent/status`            | Whether the AI assistant is configured (provider/model).             |
-| `POST /api/chat`                    | Run the assistant across all connected servers: `{ "messages": [...] }` → `{ reply, steps }`. |
+| `POST /api/chat`                    | Run the assistant across all connected servers: `{ "messages": [...] }` → `{ reply, steps, usage, cost, model }`. |
 
 ## Project layout
 
@@ -186,6 +195,7 @@ src/server/
   oauthProvider.ts  Adobe IMS OAuthClientProvider (one instance per server)
   mcpClient.ts      Per-server connection managers + cross-server tool aggregation
   agent.ts          AI assistant: agentic tool-calling loop (Anthropic/OpenAI)
+  pricing.ts        Per-model price table + token cost estimation
   toolCatalog.ts    Categorizes Target & Analytics tools for display
   index.ts          Express server, REST API, per-server OAuth callback, static hosting
 public/

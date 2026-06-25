@@ -1,6 +1,7 @@
 import { config, type LlmProviderId } from "./config.js";
 import { logger } from "./logger.js";
 import { aggregatedTools, callAggregatedTool } from "./mcpClient.js";
+import { estimateCost, type CostEstimate } from "./pricing.js";
 
 /** A chat message exchanged with the frontend (plain text only). */
 export interface ChatMessage {
@@ -31,10 +32,23 @@ export interface AgentStep {
   preview?: string;
 }
 
+export interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  /** Number of LLM round-trips made for this message. */
+  llmCalls: number;
+}
+
 export interface AgentResult {
   reply: string;
   steps: AgentStep[];
   stoppedReason: "completed" | "max_steps";
+  model: string;
+  provider: LlmProviderId;
+  usage: TokenUsage;
+  /** List-price cost estimate, or null when the model's price is unknown. */
+  cost: CostEstimate | null;
 }
 
 interface LlmTool {
@@ -46,6 +60,7 @@ interface LlmTool {
 interface LlmCompletion {
   text: string;
   toolCalls: ToolCall[];
+  usage: { inputTokens: number; outputTokens: number };
 }
 
 interface LlmProvider {
@@ -153,6 +168,12 @@ class AnthropicProvider implements LlmProvider {
     }
     const data = (await res.json()) as {
       content?: Array<{ type: string; text?: string; id?: string; name?: string; input?: unknown }>;
+      usage?: {
+        input_tokens?: number;
+        output_tokens?: number;
+        cache_read_input_tokens?: number;
+        cache_creation_input_tokens?: number;
+      };
     };
 
     let text = "";
@@ -167,7 +188,16 @@ class AnthropicProvider implements LlmProvider {
         });
       }
     }
-    return { text, toolCalls };
+    const u = data.usage ?? {};
+    const inputTokens =
+      (u.input_tokens ?? 0) +
+      (u.cache_read_input_tokens ?? 0) +
+      (u.cache_creation_input_tokens ?? 0);
+    return {
+      text,
+      toolCalls,
+      usage: { inputTokens, outputTokens: u.output_tokens ?? 0 },
+    };
   }
 
   private toAnthropicMessages(messages: WorkMessage[]): unknown[] {
@@ -257,6 +287,7 @@ class OpenAIProvider implements LlmProvider {
           tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }>;
         };
       }>;
+      usage?: { prompt_tokens?: number; completion_tokens?: number };
     };
 
     const message = data.choices?.[0]?.message;
@@ -271,7 +302,15 @@ class OpenAIProvider implements LlmProvider {
       }
       toolCalls.push({ id: tc.id, name: tc.function.name, input });
     }
-    return { text, toolCalls };
+    const u = data.usage ?? {};
+    return {
+      text,
+      toolCalls,
+      usage: {
+        inputTokens: u.prompt_tokens ?? 0,
+        outputTokens: u.completion_tokens ?? 0,
+      },
+    };
   }
 
   private toOpenAIMessages(messages: WorkMessage[]): unknown[] {
@@ -352,9 +391,34 @@ export async function runAgent(
   }));
 
   const steps: AgentStep[] = [];
+  const usage: TokenUsage = {
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    llmCalls: 0,
+  };
+  const accrue = (c: LlmCompletion) => {
+    usage.inputTokens += c.usage.inputTokens;
+    usage.outputTokens += c.usage.outputTokens;
+    usage.totalTokens = usage.inputTokens + usage.outputTokens;
+    usage.llmCalls += 1;
+  };
+  const finalize = (
+    reply: string,
+    stoppedReason: AgentResult["stoppedReason"],
+  ): AgentResult => ({
+    reply,
+    steps,
+    stoppedReason,
+    model: config.llm.model,
+    provider: config.llm.provider,
+    usage,
+    cost: estimateCost(config.llm.model, usage.inputTokens, usage.outputTokens),
+  });
 
   for (let i = 0; i < config.llm.maxSteps; i++) {
     const completion = await provider.complete(system, transcript, tools);
+    accrue(completion);
     transcript.push({
       role: "assistant",
       content: completion.text || null,
@@ -362,7 +426,7 @@ export async function runAgent(
     });
 
     if (!completion.toolCalls.length) {
-      return { reply: completion.text, steps, stoppedReason: "completed" };
+      return finalize(completion.text, "completed");
     }
 
     for (const call of completion.toolCalls) {
@@ -399,12 +463,11 @@ export async function runAgent(
   const finalNote =
     "Reached the maximum number of reasoning steps. Summarize what you found so far based on the tool results above; do not call more tools.";
   transcript.push({ role: "user", content: finalNote });
-  const finalCompletion = await getProvider().complete(system, transcript, []);
-  return {
-    reply:
-      finalCompletion.text ||
+  const finalCompletion = await provider.complete(system, transcript, []);
+  accrue(finalCompletion);
+  return finalize(
+    finalCompletion.text ||
       "I reached the step limit before finishing. Please refine your question or try again.",
-    steps,
-    stoppedReason: "max_steps",
-  };
+    "max_steps",
+  );
 }

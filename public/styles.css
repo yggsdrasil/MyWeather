@@ -455,12 +455,46 @@ body {
   color: var(--text);
   border-bottom-color: var(--accent);
 }
-.agent-model {
+.view-tabs-right {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-bottom: 8px;
+}
+.agent-model {
   font-size: 11px;
   color: var(--text-dim);
   font-family: var(--mono);
-  padding-bottom: 8px;
+}
+.usage-total {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--mono);
+  white-space: nowrap;
+}
+.usage-total b {
+  color: var(--green);
+  font-weight: 600;
+}
+
+/* Per-reply usage line */
+.msg-usage {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: center;
+}
+.msg-usage .usage-cost {
+  color: var(--green);
+  font-weight: 600;
+}
+.msg-usage .usage-sep {
+  opacity: 0.4;
 }
 
 .assistant-view {

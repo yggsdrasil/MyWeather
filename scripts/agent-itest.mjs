@@ -14,6 +14,9 @@ const PORT = 8731;
 process.env.LLM_PROVIDER = provider;
 process.env.LLM_API_KEY = "test-key";
 process.env.LLM_MODEL = "test-model";
+// Fixed prices so the cost estimate is deterministic in the test.
+process.env.LLM_PRICE_INPUT = "3";
+process.env.LLM_PRICE_OUTPUT = "15";
 if (provider === "anthropic") {
   process.env.ANTHROPIC_BASE_URL = `http://localhost:${PORT}/v1`;
 } else {
@@ -47,6 +50,7 @@ const server = http.createServer(async (req, res) => {
         JSON.stringify({
           content: [{ type: "text", text: FINAL_TEXT }],
           stop_reason: "end_turn",
+          usage: { input_tokens: 150, output_tokens: 30 },
         }),
       );
     } else {
@@ -62,6 +66,7 @@ const server = http.createServer(async (req, res) => {
             },
           ],
           stop_reason: "tool_use",
+          usage: { input_tokens: 100, output_tokens: 20 },
         }),
       );
     }
@@ -75,6 +80,7 @@ const server = http.createServer(async (req, res) => {
       res.end(
         JSON.stringify({
           choices: [{ message: { role: "assistant", content: FINAL_TEXT } }],
+          usage: { prompt_tokens: 150, completion_tokens: 30 },
         }),
       );
     } else {
@@ -98,6 +104,7 @@ const server = http.createServer(async (req, res) => {
               },
             },
           ],
+          usage: { prompt_tokens: 100, completion_tokens: 20 },
         }),
       );
     }
@@ -186,6 +193,20 @@ try {
   assert(
     result.reply.includes("Homepage Hero"),
     "final reply summarizes real tool data",
+  );
+
+  // Token usage aggregated across both LLM round-trips.
+  assert(result.usage.llmCalls === 2, "counted 2 LLM calls");
+  assert(result.usage.inputTokens === 250, "summed input tokens (100+150)");
+  assert(result.usage.outputTokens === 50, "summed output tokens (20+30)");
+  assert(result.usage.totalTokens === 300, "summed total tokens");
+
+  // Cost estimate using the fixed test prices ($3 in / $15 out per 1M).
+  const expected = (250 / 1e6) * 3 + (50 / 1e6) * 15; // 0.0015
+  assert(result.cost !== null, "cost estimate was produced");
+  assert(
+    Math.abs(result.cost.totalUSD - expected) < 1e-9,
+    `cost estimate is correct (~$${expected})`,
   );
 
   console.log(`[${provider}] PASSED\n`);
