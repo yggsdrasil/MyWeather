@@ -129,7 +129,10 @@ function renderServerList(container) {
     name.innerHTML = `<span class="sdot ${st}"></span>${s.label}`;
     const url = document.createElement("p");
     url.className = "server-row-url";
-    url.textContent = s.serverUrl;
+    const meta = [s.serverUrl];
+    if (s.authMode) meta.push(s.authMode);
+    if (s.note) meta.push(s.note);
+    url.textContent = meta.join(" · ");
     nameWrap.appendChild(name);
     nameWrap.appendChild(url);
 

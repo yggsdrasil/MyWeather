@@ -5,8 +5,8 @@ through Adobe's **Model Context Protocol (MCP)** servers:
 
 - **Adobe Target** — `https://targetmcp.adobe.io/mcp`
 - **Adobe Analytics** — `https://aa-mcp.adobe.io/mcp`
-- **Adobe Launch** (Experience Platform Data Collection / Tags) — endpoint set
-  via `LAUNCH_MCP_URL` (see note below)
+- **Adobe Launch** (Experience Platform Data Collection / Tags) — via the
+  **Reactor REST API** using server-to-server credentials (see note below)
 
 It acts as an MCP host/client: each server is connected independently via the
 Adobe IMS OAuth 2.0 authorization flow, the app discovers the tools each server
@@ -30,13 +30,29 @@ URLs, query Analytics report suites/dimensions/metrics/segments, and inspect
 Launch properties, rules, data elements, extensions, and libraries — all without
 writing raw API calls.
 
-> **Adobe Launch endpoint:** Adobe has not yet published a public hosted Launch
-> (Data Collection / Tags) MCP server. The Launch tile appears in the app, but it
-> will only connect once you point `LAUNCH_MCP_URL` at a real endpoint — the
-> official one when Adobe ships it, or your own / App Builder Launch MCP server.
-> Until then, clicking **Connect** on Launch returns a clear "endpoint not
-> reachable" message. Set `LAUNCH_MCP_URL=off` to hide it. Everything else works
-> identically to Target and Analytics.
+> **Adobe Launch:** Adobe has no public hosted Launch (Data Collection / Tags)
+> MCP server, so this app connects Launch to the **Reactor REST API**
+> (`https://reactor.adobe.io`) directly, using Adobe IMS **server-to-server
+> credentials**. It still appears as a server in the UI and the assistant uses
+> its tools alongside Target/Analytics — only the transport differs (a product
+> REST API instead of MCP + browser OAuth).
+>
+> Configure it in `.env` with either a static access token or a client id +
+> secret (the app mints and refreshes IMS tokens itself):
+>
+> ```bash
+> LAUNCH_CLIENT_ID=...
+> LAUNCH_CLIENT_SECRET=...
+> # and/or a static token:
+> LAUNCH_ACCESS_TOKEN=eyJ...
+> # optional: LAUNCH_ORG_ID (derived from the token), LAUNCH_COMPANY_ID, LAUNCH_TENANT
+> ```
+>
+> Launch then exposes read-only tools: list companies, properties, rules, rule
+> components, data elements, extensions, environments, and libraries/builds. If
+> no Reactor credentials are set, the Launch server falls back to MCP mode using
+> `LAUNCH_MCP_URL` (for a future official endpoint or your own Launch MCP
+> server); set that to `off` to hide Launch entirely.
 
 ## Example assistant prompts
 
@@ -119,7 +135,10 @@ Configuration (all optional — sensible defaults are used):
 | `PUBLIC_BASE_URL`   | `http://localhost:4321`          | Base URL the browser uses; each server's OAuth redirect is `${PUBLIC_BASE_URL}/oauth/callback/<id>`. |
 | `TARGET_MCP_URL`    | `https://targetmcp.adobe.io/mcp` | Adobe Target MCP server endpoint (set to `off` to hide it). |
 | `ANALYTICS_MCP_URL` | `https://aa-mcp.adobe.io/mcp`    | Adobe Analytics MCP server endpoint (set to `off` to hide it). |
-| `LAUNCH_MCP_URL`    | `https://launch-mcp.adobe.io/mcp` | Adobe Launch (Data Collection / Tags) MCP endpoint. Placeholder default — set to the real endpoint when available, or `off` to hide. |
+| `LAUNCH_CLIENT_ID` / `LAUNCH_CLIENT_SECRET` | _(unset)_ | Adobe IMS server-to-server credentials for the Launch Reactor API. When set, Launch uses the Reactor API. |
+| `LAUNCH_ACCESS_TOKEN` | _(unset)_                      | Optional static IMS access token for Launch (used until expiry; refreshed via client creds if available). |
+| `LAUNCH_ORG_ID` / `LAUNCH_COMPANY_ID` / `LAUNCH_TENANT` | _(unset)_ | Optional Launch identifiers; org id is derived from the token when omitted. |
+| `LAUNCH_MCP_URL`    | `https://launch-mcp.adobe.io/mcp` | Launch MCP endpoint, used only when no Reactor credentials are set. `off` hides Launch. |
 | `DATA_DIR`          | `.data`                          | Where OAuth tokens & client registration are stored (one file per server). |
 
 ### Enabling the AI assistant (optional)
@@ -171,8 +190,9 @@ Then open <http://localhost:4321> and:
 
 1. Connect a server: click **Connect** next to **Adobe Target**, **Adobe
    Analytics**, and/or **Adobe Launch** (also available any time via the
-   **Connections** button in the top bar). Launch requires `LAUNCH_MCP_URL` to
-   point at a reachable endpoint (see the note above).
+   **Connections** button in the top bar). Target/Analytics open an Adobe IMS
+   sign-in; Launch connects immediately using the configured Reactor
+   credentials (no browser step).
 2. A new tab opens for the **Adobe IMS** login. Sign in and select your
    organization. You are redirected back at `/oauth/callback/<server>`. Repeat
    for the second server if you want both.
@@ -211,11 +231,13 @@ src/server/
   config.ts         Environment-driven configuration
   logger.ts         Minimal structured logger
   tokenStore.ts     Per-server JSON-file persistence for OAuth artifacts
-  oauthProvider.ts  Adobe IMS OAuthClientProvider (one instance per server)
-  mcpClient.ts      Per-server connection managers + cross-server tool aggregation
+  oauthProvider.ts  Adobe IMS OAuthClientProvider (one instance per MCP server)
+  serverManager.ts  Shared ServerManager interface + connection types
+  mcpClient.ts      MCP connection managers + registry + cross-server tool aggregation
+  reactorClient.ts  Adobe Launch (Reactor REST API) connection manager + tools
   agent.ts          AI assistant: agentic tool-calling loop (Anthropic/OpenAI)
   pricing.ts        Per-model price table + token cost estimation
-  toolCatalog.ts    Categorizes Target & Analytics tools for display
+  toolCatalog.ts    Categorizes Target/Analytics/Launch tools for display
   index.ts          Express server, REST API, per-server OAuth callback, static hosting
 public/
   index.html, styles.css, app.js   The web UI (Assistant + Tools views)

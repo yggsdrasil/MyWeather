@@ -36,6 +36,28 @@ export interface LlmConfig {
   priceOutput?: number;
 }
 
+export type ServerKind = "mcp" | "reactor";
+
+/** Credentials/config for the Adobe Launch (Reactor) REST API connection. */
+export interface ReactorConfig {
+  /** Reactor API base URL. */
+  baseUrl: string;
+  /** Adobe IMS base URL used to mint server-to-server tokens. */
+  imsBaseUrl: string;
+  clientId: string;
+  clientSecret: string;
+  /** Optional static access token (used as-is until it expires). */
+  accessToken: string;
+  /** IMS org id (e.g. ...@AdobeOrg). Derived from the token when omitted. */
+  orgId: string;
+  /** OAuth scopes requested when minting tokens from client credentials. */
+  scopes: string;
+  /** Optional Reactor company id to scope property listings. */
+  companyId: string;
+  /** Optional tenant name, for display. */
+  tenant: string;
+}
+
 export interface McpServerConfig {
   /** Stable identifier used in URLs, storage filenames, and the UI. */
   id: string;
@@ -43,10 +65,14 @@ export interface McpServerConfig {
   label: string;
   /** Short product tag used to namespace tools for the assistant. */
   shortTag: string;
-  /** The MCP server endpoint. */
+  /** Connection kind: a remote MCP server, or the Adobe Launch Reactor API. */
+  kind: ServerKind;
+  /** The MCP server endpoint (kind === "mcp"). */
   url: string;
   /** OAuth redirect URI for this server (must be unique per server). */
   redirectUrl: string;
+  /** Reactor REST API config (kind === "reactor"). */
+  reactor?: ReactorConfig;
 }
 
 export interface AppConfig {
@@ -60,32 +86,69 @@ export interface AppConfig {
   llm: LlmConfig;
 }
 
+/** Builds the Adobe Launch server definition, choosing Reactor API vs MCP. */
+function resolveLaunchServer():
+  | (Omit<McpServerConfig, "redirectUrl"> & { url: string })
+  | null {
+  const accessToken = process.env.LAUNCH_ACCESS_TOKEN ?? "";
+  const clientId = process.env.LAUNCH_CLIENT_ID ?? "";
+  const clientSecret = process.env.LAUNCH_CLIENT_SECRET ?? "";
+  const useReactor = Boolean(accessToken || (clientId && clientSecret));
+
+  if (useReactor) {
+    const reactor: ReactorConfig = {
+      baseUrl: (process.env.LAUNCH_REACTOR_URL ?? "https://reactor.adobe.io").replace(
+        /\/+$/,
+        "",
+      ),
+      imsBaseUrl: (
+        process.env.ADOBE_IMS_BASE_URL ?? "https://ims-na1.adobelogin.com"
+      ).replace(/\/+$/, ""),
+      clientId,
+      clientSecret,
+      accessToken,
+      orgId: process.env.LAUNCH_ORG_ID ?? "",
+      scopes:
+        process.env.LAUNCH_SCOPES ??
+        "openid, AdobeID, read_organizations, additional_info.projectedProductContext, additional_info.roles",
+      companyId: process.env.LAUNCH_COMPANY_ID ?? "",
+      tenant: process.env.LAUNCH_TENANT ?? "",
+    };
+    return {
+      id: "launch",
+      label: "Adobe Launch",
+      shortTag: "launch",
+      kind: "reactor",
+      url: reactor.baseUrl,
+      reactor,
+    };
+  }
+
+  // Fall back to MCP mode (no public Launch MCP endpoint exists yet).
+  const url = process.env.LAUNCH_MCP_URL ?? "https://launch-mcp.adobe.io/mcp";
+  return { id: "launch", label: "Adobe Launch", shortTag: "launch", kind: "mcp", url };
+}
+
 function resolveServers(): McpServerConfig[] {
   const defs: Array<Omit<McpServerConfig, "redirectUrl"> & { url: string }> = [
     {
       id: "target",
       label: "Adobe Target",
       shortTag: "target",
+      kind: "mcp",
       url: process.env.TARGET_MCP_URL ?? "https://targetmcp.adobe.io/mcp",
     },
     {
       id: "analytics",
       label: "Adobe Analytics",
       shortTag: "analytics",
+      kind: "mcp",
       url: process.env.ANALYTICS_MCP_URL ?? "https://aa-mcp.adobe.io/mcp",
     },
-    {
-      id: "launch",
-      label: "Adobe Launch",
-      shortTag: "launch",
-      // Adobe Launch = Adobe Experience Platform Data Collection (Tags).
-      // Adobe has not published a public hosted Launch MCP endpoint yet, so this
-      // is a best-guess following Adobe's naming convention. Override it with
-      // LAUNCH_MCP_URL once the official endpoint is available (or point it at
-      // your own / App Builder Launch MCP server), or set it to "off" to hide.
-      url: process.env.LAUNCH_MCP_URL ?? "https://launch-mcp.adobe.io/mcp",
-    },
   ];
+
+  const launch = resolveLaunchServer();
+  if (launch) defs.push(launch);
 
   return defs
     .filter((d) => d.url && d.url.toLowerCase() !== "off")

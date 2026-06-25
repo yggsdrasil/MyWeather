@@ -4,60 +4,29 @@ import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
 import { config, type McpServerConfig } from "./config.js";
 import { logger } from "./logger.js";
 import { AdobeImsOAuthProvider } from "./oauthProvider.js";
-import { categorizeTool, CATEGORIES, type ToolCategory } from "./toolCatalog.js";
+import { groupToolsByCategory, type RawTool, type ToolCatalogGroup } from "./toolCatalog.js";
+import { ReactorClientManager } from "./reactorClient.js";
+import {
+  ConnectionRequiredError,
+  type ConnectResult,
+  type ConnectionStatus,
+  type ServerManager,
+} from "./serverManager.js";
 
-export interface ConnectResult {
-  connected: boolean;
-  /** When set, the browser must visit this URL to authorize with Adobe IMS. */
-  authorizationUrl?: string;
-}
-
-export interface ConnectionStatus {
-  id: string;
-  label: string;
-  connected: boolean;
-  hasCredentials: boolean;
-  serverUrl: string;
-  serverInfo?: { name?: string; version?: string };
-  toolCount?: number;
-}
-
-export interface CatalogTool {
-  name: string;
-  description: string;
-  inputSchema: unknown;
-  category: ToolCategory;
-}
-
-export interface ToolCatalogGroup {
-  category: ToolCategory;
-  tools: CatalogTool[];
-}
-
-export interface RawTool {
-  name: string;
-  description: string;
-  inputSchema: unknown;
-}
+export { ConnectionRequiredError };
+export type { ConnectResult, ConnectionStatus, ServerManager };
+export type { RawTool, ToolCatalogGroup } from "./toolCatalog.js";
 
 const CLIENT_INFO = {
   name: "adobe-mcp-client",
   version: "1.0.0",
 };
 
-/** Thrown for expected "you must connect first" conditions (HTTP 409). */
-export class ConnectionRequiredError extends Error {
-  constructor(message = "Not connected to this Adobe MCP server") {
-    super(message);
-    this.name = "ConnectionRequiredError";
-  }
-}
-
 /**
  * Manages a single long-lived connection to one Adobe MCP server (Target,
  * Analytics, …), including the OAuth authorization lifecycle.
  */
-export class McpClientManager {
+export class McpClientManager implements ServerManager {
   readonly id: string;
   readonly label: string;
   private readonly authProvider: AdobeImsOAuthProvider;
@@ -189,27 +158,7 @@ export class McpClientManager {
 
   async listTools(): Promise<ToolCatalogGroup[]> {
     const tools = await this.getRawTools();
-
-    const grouped = new Map<string, CatalogTool[]>();
-    for (const tool of tools) {
-      const category = categorizeTool(tool.name);
-      const entry: CatalogTool = {
-        name: tool.name,
-        description: tool.description,
-        inputSchema: tool.inputSchema,
-        category,
-      };
-      const list = grouped.get(category.id) ?? [];
-      list.push(entry);
-      grouped.set(category.id, list);
-    }
-
-    return Array.from(grouped.entries())
-      .map(([id, catTools]) => ({
-        category: CATEGORIES[id] ?? CATEGORIES.other,
-        tools: catTools.sort((a, b) => a.name.localeCompare(b.name)),
-      }))
-      .sort((a, b) => a.category.order - b.category.order);
+    return groupToolsByCategory(tools);
   }
 
   async callTool(
@@ -244,9 +193,11 @@ export class McpClientManager {
     return {
       id: this.id,
       label: this.label,
+      kind: "mcp",
       connected: this.connected,
       hasCredentials: this.authProvider.hasTokens(),
       serverUrl: this.server.url,
+      authMode: "OAuth (browser sign-in)",
       serverInfo: this.serverInfo,
       toolCount: this.cachedToolCount,
     };
@@ -257,20 +208,25 @@ export class McpClientManager {
 // Registry of all configured servers
 // ---------------------------------------------------------------------------
 
-const managers = new Map<string, McpClientManager>();
+const managers = new Map<string, ServerManager>();
 for (const server of config.servers) {
-  managers.set(server.id, new McpClientManager(server));
+  managers.set(
+    server.id,
+    server.kind === "reactor"
+      ? new ReactorClientManager(server)
+      : new McpClientManager(server),
+  );
 }
 
-export function getManager(id: string): McpClientManager | undefined {
+export function getManager(id: string): ServerManager | undefined {
   return managers.get(id);
 }
 
-export function allManagers(): McpClientManager[] {
+export function allManagers(): ServerManager[] {
   return Array.from(managers.values());
 }
 
-export function connectedManagers(): McpClientManager[] {
+export function connectedManagers(): ServerManager[] {
   return allManagers().filter((m) => m.isConnected);
 }
 

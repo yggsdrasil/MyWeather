@@ -107,3 +107,42 @@ export function categorizeTool(toolName: string): ToolCategory {
   }
   return CATEGORIES.other;
 }
+
+export interface RawTool {
+  name: string;
+  description: string;
+  inputSchema: unknown;
+}
+
+export interface CatalogTool extends RawTool {
+  category: ToolCategory;
+}
+
+export interface ToolCatalogGroup {
+  category: ToolCategory;
+  tools: CatalogTool[];
+}
+
+/** Groups a flat tool list into category buckets sorted for display. */
+export function groupToolsByCategory(tools: RawTool[]): ToolCatalogGroup[] {
+  const grouped = new Map<string, CatalogTool[]>();
+  for (const tool of tools) {
+    const category = categorizeTool(tool.name);
+    const entry: CatalogTool = {
+      name: tool.name,
+      description: tool.description,
+      inputSchema: tool.inputSchema,
+      category,
+    };
+    const list = grouped.get(category.id) ?? [];
+    list.push(entry);
+    grouped.set(category.id, list);
+  }
+
+  return Array.from(grouped.entries())
+    .map(([id, catTools]) => ({
+      category: CATEGORIES[id] ?? CATEGORIES.other,
+      tools: catTools.sort((a, b) => a.name.localeCompare(b.name)),
+    }))
+    .sort((a, b) => a.category.order - b.category.order);
+}
