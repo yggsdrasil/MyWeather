@@ -33,17 +33,52 @@ export interface LlmConfig {
   maxTokens: number;
 }
 
+export interface McpServerConfig {
+  /** Stable identifier used in URLs, storage filenames, and the UI. */
+  id: string;
+  /** Human-friendly name shown in the UI. */
+  label: string;
+  /** Short product tag used to namespace tools for the assistant. */
+  shortTag: string;
+  /** The MCP server endpoint. */
+  url: string;
+  /** OAuth redirect URI for this server (must be unique per server). */
+  redirectUrl: string;
+}
+
 export interface AppConfig {
   port: number;
   publicBaseUrl: string;
-  /** OAuth redirect URI registered with Adobe IMS via the MCP auth flow. */
-  redirectUrl: string;
-  /** Adobe Target MCP server endpoint. */
-  targetMcpUrl: string;
+  /** All configured Adobe MCP servers (Target, Analytics, …). */
+  servers: McpServerConfig[];
   /** Directory used to persist OAuth tokens + client registration. */
   dataDir: string;
   /** AI assistant (LLM) configuration. */
   llm: LlmConfig;
+}
+
+function resolveServers(): McpServerConfig[] {
+  const defs: Array<Omit<McpServerConfig, "redirectUrl"> & { url: string }> = [
+    {
+      id: "target",
+      label: "Adobe Target",
+      shortTag: "target",
+      url: process.env.TARGET_MCP_URL ?? "https://targetmcp.adobe.io/mcp",
+    },
+    {
+      id: "analytics",
+      label: "Adobe Analytics",
+      shortTag: "analytics",
+      url: process.env.ANALYTICS_MCP_URL ?? "https://aa-mcp.adobe.io/mcp",
+    },
+  ];
+
+  return defs
+    .filter((d) => d.url && d.url.toLowerCase() !== "off")
+    .map((d) => ({
+      ...d,
+      redirectUrl: `${publicBaseUrl}/oauth/callback/${d.id}`,
+    }));
 }
 
 function resolveLlmConfig(): LlmConfig {
@@ -83,8 +118,7 @@ function resolveLlmConfig(): LlmConfig {
 export const config: AppConfig = {
   port,
   publicBaseUrl,
-  redirectUrl: `${publicBaseUrl}/oauth/callback`,
-  targetMcpUrl: process.env.TARGET_MCP_URL ?? "https://targetmcp.adobe.io/mcp",
+  servers: resolveServers(),
   dataDir: resolveFromRoot(process.env.DATA_DIR ?? ".data"),
   llm: resolveLlmConfig(),
 };

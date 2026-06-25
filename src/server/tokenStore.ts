@@ -66,4 +66,7 @@ export interface AuthStoreShape {
   [key: string]: unknown;
 }
 
-export const authStore = new JsonFileStore<AuthStoreShape>("auth.json");
+/** Creates an isolated auth store for a given MCP server id. */
+export function createAuthStore(serverId: string): JsonFileStore<AuthStoreShape> {
+  return new JsonFileStore<AuthStoreShape>(`auth-${serverId}.json`);
+}

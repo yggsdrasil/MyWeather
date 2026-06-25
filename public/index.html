@@ -16,14 +16,13 @@
       <div class="brand">
         <span class="brand-mark">A</span>
         <div class="brand-text">
-          <h1>Adobe Target <span class="brand-sub">MCP Client</span></h1>
-          <p id="server-url" class="server-url">connecting…</p>
+          <h1>Adobe <span class="brand-sub">MCP Client</span></h1>
+          <p id="server-url" class="server-url">Target &amp; Analytics</p>
         </div>
       </div>
       <div class="topbar-actions">
-        <span id="status-badge" class="badge badge-idle">Disconnected</span>
-        <button id="connect-btn" class="btn btn-primary">Connect</button>
-        <button id="logout-btn" class="btn btn-ghost hidden">Sign out</button>
+        <div id="server-chips" class="server-chips"></div>
+        <button id="connections-btn" class="btn btn-ghost">Connections</button>
       </div>
     </header>
 
@@ -33,34 +32,34 @@
       <!-- Pre-connection / auth panel -->
       <section id="welcome" class="welcome">
         <div class="welcome-card">
-          <h2>Connect to Adobe Target</h2>
+          <h2>Connect your Adobe MCP servers</h2>
           <p>
-            This app talks to Adobe Target through Adobe's
-            <strong>Model Context Protocol (MCP)</strong> server. Click
-            <em>Connect</em> to sign in with your Adobe Experience Cloud
-            account. Authentication uses Adobe IMS OAuth 2.0 — no static
-            credentials are stored by Adobe.
+            This app talks to Adobe Experience Cloud through Adobe's
+            <strong>Model Context Protocol (MCP)</strong> servers. Connect
+            <strong>Adobe Target</strong> and/or <strong>Adobe Analytics</strong>
+            — each signs in separately with Adobe IMS OAuth 2.0 (no static
+            credentials are stored). Once connected, browse tools or ask the
+            assistant in plain language.
           </p>
-          <ol class="steps">
-            <li>Click <strong>Connect</strong>.</li>
-            <li>Authorize with Adobe IMS in the popup / new tab.</li>
-            <li>
-              Browse the available tools and run experimentation &amp;
-              personalization queries.
-            </li>
-          </ol>
-          <div id="auth-action" class="auth-action hidden">
-            <p>Authorization is required to continue.</p>
-            <a id="authorize-link" class="btn btn-primary" target="_blank" rel="noopener"
-              >Authorize with Adobe</a
-            >
-          </div>
+          <div id="welcome-servers" class="server-list"></div>
           <p class="role-note">
-            Access is governed by your Adobe Target role: Observer (read),
-            Editor (read + write), Approver (activate / deactivate).
+            Access is governed by your Adobe product roles (e.g. Target Observer
+            / Editor / Approver, or Analytics report-suite permissions).
           </p>
         </div>
       </section>
+
+      <!-- Connections modal (manage servers any time) -->
+      <div id="connections-modal" class="modal hidden">
+        <div class="modal-backdrop" data-action="close-modal"></div>
+        <div class="modal-card">
+          <div class="modal-head">
+            <h2>Connections</h2>
+            <button class="modal-close" data-action="close-modal">×</button>
+          </div>
+          <div id="modal-servers" class="server-list"></div>
+        </div>
+      </div>
 
       <!-- Connected workspace -->
       <section id="workspace" class="workspace hidden">
@@ -148,6 +147,7 @@
         <div id="tools-view" class="tools-view hidden">
         <aside class="sidebar">
           <div class="sidebar-head">
+            <div id="tool-server-tabs" class="tool-server-tabs"></div>
             <input
               id="tool-search"
               type="search"
@@ -205,8 +205,8 @@
 
     <footer class="footer">
       <span
-        >Unofficial client for the Adobe Target MCP server
-        (<code id="footer-server">targetmcp.adobe.io</code>). Provided “as is”.</span
+        >Unofficial client for Adobe's MCP servers (Adobe Target &amp; Adobe
+        Analytics). Provided “as is”.</span
       >
     </footer>
 

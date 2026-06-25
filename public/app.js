@@ -1,15 +1,14 @@
-// Adobe Target MCP client — frontend controller.
+// Adobe MCP client — frontend controller (multi-server: Target + Analytics).
 
 const els = {
-  statusBadge: document.getElementById("status-badge"),
-  connectBtn: document.getElementById("connect-btn"),
-  logoutBtn: document.getElementById("logout-btn"),
-  serverUrl: document.getElementById("server-url"),
-  footerServer: document.getElementById("footer-server"),
+  serverChips: document.getElementById("server-chips"),
+  connectionsBtn: document.getElementById("connections-btn"),
   welcome: document.getElementById("welcome"),
+  welcomeServers: document.getElementById("welcome-servers"),
+  modal: document.getElementById("connections-modal"),
+  modalServers: document.getElementById("modal-servers"),
   workspace: document.getElementById("workspace"),
-  authAction: document.getElementById("auth-action"),
-  authorizeLink: document.getElementById("authorize-link"),
+  toolServerTabs: document.getElementById("tool-server-tabs"),
   toolList: document.getElementById("tool-list"),
   toolCount: document.getElementById("tool-count"),
   toolSearch: document.getElementById("tool-search"),
@@ -40,13 +39,16 @@ const els = {
 };
 
 const state = {
-  groups: [],
+  servers: [], // [{ id, label, connected, hasCredentials, serverUrl, toolCount }]
+  groups: [], // tool catalog for the active tool server
+  activeToolServer: null, // server id selected in the Tools tab
   selected: null, // currently selected tool object
   mode: "form", // "form" | "json"
   view: "assistant", // "assistant" | "tools"
   agent: { available: false, model: null },
   messages: [], // [{ role, content }]
   sending: false,
+  connecting: {}, // serverId -> bool
 };
 
 // --------------------------------------------------------------------------
@@ -78,118 +80,209 @@ function toast(message, type = "info", duration = 4000) {
 }
 
 // --------------------------------------------------------------------------
-// Status / connection
+// Servers / connection (multi-server)
 // --------------------------------------------------------------------------
-function renderStatus(status) {
-  if (status.serverUrl) {
-    els.serverUrl.textContent = status.serverUrl;
-    try {
-      els.footerServer.textContent = new URL(status.serverUrl).host;
-    } catch (_) {
-      /* ignore */
-    }
-  }
+function serverState(s) {
+  if (s.connected) return "connected";
+  if (s.hasCredentials) return "auth";
+  return "idle";
+}
 
-  const badge = els.statusBadge;
-  if (status.connected) {
-    badge.textContent = status.toolCount
-      ? `Connected · ${status.toolCount} tools`
-      : "Connected";
-    badge.className = "badge badge-connected";
-    els.connectBtn.classList.add("hidden");
-    els.logoutBtn.classList.remove("hidden");
-    els.welcome.classList.add("hidden");
-    els.workspace.classList.remove("hidden");
-  } else if (status.hasCredentials) {
-    badge.textContent = "Authenticated · not connected";
-    badge.className = "badge badge-auth";
-    els.connectBtn.classList.remove("hidden");
-    els.connectBtn.textContent = "Connect";
-    els.logoutBtn.classList.remove("hidden");
-    els.welcome.classList.remove("hidden");
-    els.workspace.classList.add("hidden");
-  } else {
-    badge.textContent = "Disconnected";
-    badge.className = "badge badge-idle";
-    els.connectBtn.classList.remove("hidden");
-    els.connectBtn.textContent = "Connect";
-    els.logoutBtn.classList.add("hidden");
-    els.welcome.classList.remove("hidden");
-    els.workspace.classList.add("hidden");
+function stateLabel(s) {
+  if (s.connected)
+    return s.toolCount ? `Connected · ${s.toolCount} tools` : "Connected";
+  if (s.hasCredentials) return "Authenticated · not connected";
+  return "Not connected";
+}
+
+function renderTopbarChips() {
+  els.serverChips.innerHTML = "";
+  for (const s of state.servers) {
+    const chip = document.createElement("button");
+    chip.className = `server-chip ${serverState(s)}`;
+    chip.dataset.action = "open-modal";
+    chip.title = `${s.label}: ${stateLabel(s)}`;
+    const dot = document.createElement("span");
+    dot.className = "sdot";
+    chip.appendChild(dot);
+    chip.appendChild(document.createTextNode(s.label.replace("Adobe ", "")));
+    els.serverChips.appendChild(chip);
   }
 }
 
-async function refreshStatus() {
-  try {
-    const status = await api("/api/status");
-    renderStatus(status);
-    if (status.connected) {
-      await loadTools();
+function renderServerList(container) {
+  container.innerHTML = "";
+  for (const s of state.servers) {
+    const st = serverState(s);
+    const row = document.createElement("div");
+    row.className = "server-row";
+
+    const top = document.createElement("div");
+    top.className = "server-row-top";
+
+    const nameWrap = document.createElement("div");
+    const name = document.createElement("div");
+    name.className = "server-row-name";
+    name.innerHTML = `<span class="sdot ${st}"></span>${s.label}`;
+    const url = document.createElement("p");
+    url.className = "server-row-url";
+    url.textContent = s.serverUrl;
+    nameWrap.appendChild(name);
+    nameWrap.appendChild(url);
+
+    const actions = document.createElement("div");
+    actions.className = "server-row-actions";
+
+    const stateSpan = document.createElement("span");
+    stateSpan.className = `server-row-state ${st}`;
+    stateSpan.textContent = state.connecting[s.id]
+      ? "Connecting…"
+      : stateLabel(s);
+    actions.appendChild(stateSpan);
+
+    if (s.connected) {
+      actions.appendChild(
+        makeBtn("Disconnect", "btn-ghost", "disconnect", s.id),
+      );
+    } else {
+      actions.appendChild(
+        makeBtn("Connect", "btn-primary", "connect", s.id, state.connecting[s.id]),
+      );
+      if (s.hasCredentials) {
+        actions.appendChild(
+          makeBtn("Sign out", "btn-ghost", "logout", s.id),
+        );
+      }
     }
-    return status;
+
+    top.appendChild(nameWrap);
+    top.appendChild(actions);
+    row.appendChild(top);
+    container.appendChild(row);
+  }
+}
+
+function makeBtn(label, variant, action, serverId, disabled) {
+  const b = document.createElement("button");
+  b.className = `btn btn-sm ${variant}`;
+  b.textContent = label;
+  b.dataset.action = action;
+  b.dataset.server = serverId;
+  if (disabled) b.disabled = true;
+  return b;
+}
+
+function renderServers() {
+  renderTopbarChips();
+  renderServerList(els.welcomeServers);
+  renderServerList(els.modalServers);
+
+  const anyConnected = state.servers.some((s) => s.connected);
+  els.welcome.classList.toggle("hidden", anyConnected);
+  els.workspace.classList.toggle("hidden", !anyConnected);
+
+  if (anyConnected) {
+    renderToolServerTabs();
+  }
+}
+
+async function refreshServers() {
+  try {
+    const data = await api("/api/servers");
+    state.servers = data.servers || [];
+    renderServers();
+    // Load tools for the active/first connected server in the Tools tab.
+    const connected = state.servers.filter((s) => s.connected);
+    if (connected.length) {
+      if (!connected.some((s) => s.id === state.activeToolServer)) {
+        state.activeToolServer = connected[0].id;
+      }
+      await loadTools(state.activeToolServer);
+    } else {
+      state.activeToolServer = null;
+      state.groups = [];
+      state.selected = null;
+      els.toolList.innerHTML = "";
+    }
   } catch (err) {
     toast(err.message, "error");
   }
 }
 
-function setConnecting(on) {
-  els.connectBtn.disabled = on;
-  els.connectBtn.innerHTML = on
-    ? '<span class="spinner"></span> Connecting…'
-    : "Connect";
-}
-
-async function connect() {
-  setConnecting(true);
-  els.authAction.classList.add("hidden");
+async function connectServer(id) {
+  const server = state.servers.find((s) => s.id === id);
+  state.connecting[id] = true;
+  renderServers();
   try {
-    const data = await api("/api/connect", { method: "POST" });
+    const data = await api(`/api/servers/${id}/connect`, { method: "POST" });
     if (data.authorizationUrl) {
-      // Authorization required — surface the Adobe IMS login.
-      els.authorizeLink.href = data.authorizationUrl;
-      els.authAction.classList.remove("hidden");
-      els.statusBadge.textContent = "Authorization required";
-      els.statusBadge.className = "badge badge-auth";
-      toast("Authorize with Adobe to continue.", "info", 6000);
-      // Open the auth flow automatically in a new tab.
+      toast(`Authorize ${server ? server.label : id} with Adobe…`, "info", 6000);
       window.open(data.authorizationUrl, "_blank", "noopener");
     } else if (data.connected) {
-      toast("Connected to Adobe Target MCP server.", "success");
-      renderStatus(data.status);
-      await loadTools();
+      toast(`Connected to ${data.status.label}.`, "success");
     }
   } catch (err) {
     toast(err.message, "error", 7000);
   } finally {
-    setConnecting(false);
+    state.connecting[id] = false;
+    await refreshServers();
   }
 }
 
-async function logout() {
+async function disconnectServer(id) {
   try {
-    const data = await api("/api/logout", { method: "POST" });
-    state.groups = [];
-    state.selected = null;
-    state.messages = [];
-    els.toolList.innerHTML = "";
-    els.detailContent.classList.add("hidden");
-    els.detailEmpty.classList.remove("hidden");
-    // Clear chat history except the empty-state prompt grid.
-    els.chatLog.querySelectorAll(".msg").forEach((m) => m.remove());
-    els.chatEmpty.classList.remove("hidden");
-    renderStatus(data.status);
+    await api(`/api/servers/${id}/disconnect`, { method: "POST" });
+    toast("Disconnected.", "info");
+  } catch (err) {
+    toast(err.message, "error");
+  } finally {
+    await refreshServers();
+  }
+}
+
+async function logoutServer(id) {
+  try {
+    await api(`/api/servers/${id}/logout`, { method: "POST" });
     toast("Signed out and cleared credentials.", "info");
   } catch (err) {
     toast(err.message, "error");
+  } finally {
+    await refreshServers();
   }
 }
 
 // --------------------------------------------------------------------------
-// Tools
+// Tools (per connected server)
 // --------------------------------------------------------------------------
-async function loadTools() {
+function renderToolServerTabs() {
+  els.toolServerTabs.innerHTML = "";
+  const connected = state.servers.filter((s) => s.connected);
+  if (connected.length <= 1) {
+    els.toolServerTabs.classList.add("hidden");
+    return;
+  }
+  els.toolServerTabs.classList.remove("hidden");
+  for (const s of connected) {
+    const tab = document.createElement("button");
+    tab.className = `tool-server-tab ${s.id === state.activeToolServer ? "active" : ""}`;
+    tab.textContent = s.label.replace("Adobe ", "");
+    tab.addEventListener("click", () => {
+      if (state.activeToolServer === s.id) return;
+      state.activeToolServer = s.id;
+      state.selected = null;
+      els.detailContent.classList.add("hidden");
+      els.detailEmpty.classList.remove("hidden");
+      renderToolServerTabs();
+      loadTools(s.id);
+    });
+    els.toolServerTabs.appendChild(tab);
+  }
+}
+
+async function loadTools(serverId) {
+  if (!serverId) return;
   try {
-    const data = await api("/api/tools");
+    const data = await api(`/api/servers/${serverId}/tools`);
     state.groups = data.groups || [];
     renderToolList();
   } catch (err) {
@@ -483,7 +576,7 @@ async function runTool() {
   els.resultBody.innerHTML = '<p class="muted">Calling tool…</p>';
 
   try {
-    const data = await api("/api/tools/call", {
+    const data = await api(`/api/servers/${state.activeToolServer}/tools/call`, {
       method: "POST",
       body: JSON.stringify({ name: state.selected.name, arguments: args }),
     });
@@ -847,25 +940,56 @@ function handleAuthRedirect() {
   const params = new URLSearchParams(window.location.search);
   const auth = params.get("auth");
   if (!auth) return;
+  const server = params.get("server");
   if (auth === "success") {
-    toast("Authorization successful — connected!", "success");
+    toast(
+      `Authorization successful${server ? ` (${server})` : ""} — connected!`,
+      "success",
+    );
   } else if (auth === "error") {
-    toast(`Authorization failed: ${params.get("message") || "unknown error"}`, "error", 8000);
+    toast(
+      `Authorization failed: ${params.get("message") || "unknown error"}`,
+      "error",
+      8000,
+    );
   }
   // Clean up the URL.
   window.history.replaceState({}, document.title, window.location.pathname);
 }
 
 // --------------------------------------------------------------------------
+// Connections modal
+// --------------------------------------------------------------------------
+function openModal() {
+  renderServerList(els.modalServers);
+  els.modal.classList.remove("hidden");
+}
+function closeModal() {
+  els.modal.classList.add("hidden");
+}
+
+// --------------------------------------------------------------------------
 // Wire up events
 // --------------------------------------------------------------------------
-els.connectBtn.addEventListener("click", connect);
-els.logoutBtn.addEventListener("click", logout);
 els.runBtn.addEventListener("click", runTool);
 els.toolSearch.addEventListener("input", renderToolList);
 els.tabs.forEach((t) =>
   t.addEventListener("click", () => setMode(t.dataset.mode)),
 );
+
+// Connections: open modal + delegated per-server actions.
+els.connectionsBtn.addEventListener("click", openModal);
+document.addEventListener("click", (e) => {
+  const el = e.target.closest("[data-action]");
+  if (!el) return;
+  const action = el.dataset.action;
+  const id = el.dataset.server;
+  if (action === "open-modal") openModal();
+  else if (action === "close-modal") closeModal();
+  else if (action === "connect") connectServer(id);
+  else if (action === "disconnect") disconnectServer(id);
+  else if (action === "logout") logoutServer(id);
+});
 
 // View tabs (Assistant / Tools)
 els.viewTabs.forEach((t) =>
@@ -900,4 +1024,4 @@ els.promptGrid.querySelectorAll(".prompt-chip").forEach((chip) => {
 
 handleAuthRedirect();
 initAgent();
-refreshStatus();
+refreshServers();

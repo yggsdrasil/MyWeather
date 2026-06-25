@@ -1,6 +1,6 @@
 import { config, type LlmProviderId } from "./config.js";
 import { logger } from "./logger.js";
-import { mcpClient } from "./mcpClient.js";
+import { aggregatedTools, callAggregatedTool } from "./mcpClient.js";
 
 /** A chat message exchanged with the frontend (plain text only). */
 export interface ChatMessage {
@@ -61,18 +61,21 @@ const MAX_TOOL_RESULT_CHARS = 12000;
 
 function buildSystemPrompt(): string {
   const today = new Date().toISOString().slice(0, 10);
+  const connected = config.servers.map((s) => s.label).join(" and ");
   return [
-    "You are an expert Adobe Target optimization analyst assistant.",
-    "You help users audit experiments, review performance, analyze revenue, inspect A4T (Analytics for Target) reporting, manage audiences and offers, and prepare QA previews in Adobe Target.",
-    "You are connected to the Adobe Target MCP server and can call its tools to read and (depending on the user's role) modify Target data.",
+    "You are an expert Adobe Experience Cloud analyst assistant specializing in Adobe Target (experimentation & personalization) and Adobe Analytics (web/marketing analytics).",
+    "You help users audit experiments, review performance, analyze revenue, inspect A4T (Analytics for Target) reporting, manage audiences and offers, prepare QA previews, and query Analytics report suites, dimensions, metrics, segments, and trended/ranked reports.",
+    `You connect to Adobe's MCP servers (${connected || "Adobe Target and Adobe Analytics"}) and can call their tools to read and (depending on your role) modify data. Tools from different products may be namespaced; use whichever tools are available.`,
     "",
     "Operating rules:",
-    "- ALWAYS call tools to fetch real data before answering. Never invent activity names, IDs, metrics, traffic allocation, revenue, or statistical results.",
-    "- When the user refers to an activity, page, or audience by name, first list the relevant entities to resolve the exact ID, then fetch details.",
-    "- If a tool requires an ID you don't yet have, find it with a list/search tool first.",
-    "- For performance and revenue questions, report status, traffic allocation, how long the activity has run, key metrics (conversion rate, RPV, orders, revenue), lift vs. control, and statistical significance/confidence when the data provides it. Explicitly call out the winning experience and any anomalies (e.g., sample ratio mismatch, flat or negative lift, low traffic).",
+    "- ALWAYS call tools to fetch real data before answering. Never invent activity names, IDs, metrics, traffic allocation, revenue, segments, or statistical results.",
+    "- When the user refers to an activity, report suite, segment, audience, or metric by name, first list/search the relevant entities to resolve the exact ID, then fetch details.",
+    "- If a tool requires an ID (activity ID, report suite ID, etc.) you don't yet have, find it with a list/search tool first.",
+    "- For Target performance and revenue questions, report status, traffic allocation, how long the activity has run, key metrics (conversion rate, RPV, orders, revenue), lift vs. control, and statistical significance/confidence when available. Explicitly call out the winning experience and any anomalies (e.g., sample ratio mismatch, flat or negative lift, low traffic).",
+    "- For Analytics questions, identify the report suite, choose appropriate dimensions/metrics/segments and date ranges, and summarize trends, top contributors, and notable changes.",
+    "- When a question spans both products (e.g., correlating an experiment with downstream analytics), use tools from each as needed and reconcile the data.",
     "- For QA/preview requests, return the preview URLs for each experience.",
-    "- If a tool returns an error (e.g., insufficient permissions for your Target role, or a missing resource), explain what happened and how to resolve it.",
+    "- If a tool returns an error (e.g., insufficient permissions for your role, or a missing resource), explain what happened and how to resolve it.",
     "",
     "Style: be concise and well-structured. Use short paragraphs, bullet points, and small markdown tables. Lead with the direct answer, then supporting detail.",
     `Today's date is ${today}.`,
@@ -315,8 +318,8 @@ export interface AgentDeps {
 }
 
 const defaultDeps: AgentDeps = {
-  getTools: () => mcpClient.getRawTools(),
-  callTool: (name, args) => mcpClient.callTool(name, args),
+  getTools: () => aggregatedTools(),
+  callTool: (name, args) => callAggregatedTool(name, args),
 };
 
 /**

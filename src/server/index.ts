@@ -6,7 +6,12 @@ import express, {
 } from "express";
 import { config, PROJECT_ROOT } from "./config.js";
 import { logger } from "./logger.js";
-import { mcpClient, ConnectionRequiredError } from "./mcpClient.js";
+import {
+  ConnectionRequiredError,
+  allStatuses,
+  connectedManagers,
+  getManager,
+} from "./mcpClient.js";
 import { runAgent, type ChatMessage } from "./agent.js";
 
 const app = express();
@@ -28,19 +33,32 @@ function errorMessage(err: unknown): string {
   return String(err);
 }
 
+/** Resolves the manager for a `:id` route param or sends a 404. */
+function resolveManager(req: Request, res: Response) {
+  const manager = getManager(req.params.id);
+  if (!manager) {
+    res.status(404).json({ error: `Unknown MCP server: ${req.params.id}` });
+    return undefined;
+  }
+  return manager;
+}
+
 // ---------------------------------------------------------------------------
-// API routes
+// Config / status
 // ---------------------------------------------------------------------------
 
 app.get("/api/config", (_req, res) => {
   res.json({
-    serverUrl: config.targetMcpUrl,
-    redirectUrl: config.redirectUrl,
+    servers: config.servers.map((s) => ({
+      id: s.id,
+      label: s.label,
+      url: s.url,
+    })),
   });
 });
 
-app.get("/api/status", (_req, res) => {
-  res.json(mcpClient.status());
+app.get("/api/servers", (_req, res) => {
+  res.json({ servers: allStatuses() });
 });
 
 app.get("/api/agent/status", (_req, res) => {
@@ -51,9 +69,124 @@ app.get("/api/agent/status", (_req, res) => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Per-server connection lifecycle
+// ---------------------------------------------------------------------------
+
+app.post(
+  "/api/servers/:id/connect",
+  asyncHandler(async (req, res) => {
+    const manager = resolveManager(req, res);
+    if (!manager) return;
+    const result = await manager.connect();
+    res.json({ ...result, status: manager.status() });
+  }),
+);
+
+app.post(
+  "/api/servers/:id/disconnect",
+  asyncHandler(async (req, res) => {
+    const manager = resolveManager(req, res);
+    if (!manager) return;
+    await manager.disconnect();
+    res.json({ ok: true, status: manager.status() });
+  }),
+);
+
+app.post(
+  "/api/servers/:id/logout",
+  asyncHandler(async (req, res) => {
+    const manager = resolveManager(req, res);
+    if (!manager) return;
+    await manager.logout();
+    res.json({ ok: true, status: manager.status() });
+  }),
+);
+
+app.get(
+  "/api/servers/:id/tools",
+  asyncHandler(async (req, res) => {
+    const manager = resolveManager(req, res);
+    if (!manager) return;
+    const groups = await manager.listTools();
+    res.json({ groups });
+  }),
+);
+
+app.post(
+  "/api/servers/:id/tools/call",
+  asyncHandler(async (req, res) => {
+    const manager = resolveManager(req, res);
+    if (!manager) return;
+    const { name, arguments: args } = req.body ?? {};
+    if (typeof name !== "string" || !name) {
+      res.status(400).json({ error: "A tool 'name' is required" });
+      return;
+    }
+    const result = await manager.callTool(
+      name,
+      (args as Record<string, unknown>) ?? {},
+    );
+    res.json({ result });
+  }),
+);
+
 /**
- * Natural-language assistant endpoint. Accepts the full chat history and runs
- * the agentic tool-calling loop against the Adobe Target MCP server.
+ * OAuth 2.0 redirect endpoint, scoped per server. Adobe IMS redirects the
+ * browser here with an authorization `code`; we exchange it for tokens and
+ * establish the authenticated MCP session, then return the user to the app.
+ */
+app.get(
+  "/oauth/callback/:id",
+  asyncHandler(async (req, res) => {
+    const manager = getManager(req.params.id);
+    const code = req.query.code;
+    const oauthError = req.query.error;
+
+    if (!manager) {
+      res.redirect(
+        `/?auth=error&message=${encodeURIComponent(`Unknown server: ${req.params.id}`)}`,
+      );
+      return;
+    }
+
+    if (typeof oauthError === "string") {
+      const description =
+        typeof req.query.error_description === "string"
+          ? req.query.error_description
+          : "";
+      res.redirect(
+        `/?auth=error&server=${manager.id}&message=${encodeURIComponent(`${oauthError}: ${description}`)}`,
+      );
+      return;
+    }
+
+    if (typeof code !== "string" || !code) {
+      res.redirect(
+        `/?auth=error&server=${manager.id}&message=${encodeURIComponent("Missing authorization code")}`,
+      );
+      return;
+    }
+
+    try {
+      await manager.finishAuth(code);
+      res.redirect(`/?auth=success&server=${manager.id}`);
+    } catch (err) {
+      logger.error(`[${manager.id}] OAuth callback failed`, err);
+      res.redirect(
+        `/?auth=error&server=${manager.id}&message=${encodeURIComponent(errorMessage(err))}`,
+      );
+    }
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// AI assistant
+// ---------------------------------------------------------------------------
+
+/**
+ * Natural-language assistant endpoint. Runs the agentic tool-calling loop
+ * against every connected Adobe MCP server (Target, Analytics, …).
  */
 app.post(
   "/api/chat",
@@ -65,9 +198,10 @@ app.post(
       });
       return;
     }
-    if (!mcpClient.status().connected) {
+    if (connectedManagers().length === 0) {
       res.status(409).json({
-        error: "Connect to the Adobe Target MCP server before using the assistant.",
+        error:
+          "Connect to at least one Adobe MCP server (Target or Analytics) before using the assistant.",
       });
       return;
     }
@@ -90,98 +224,6 @@ app.post(
 
     const result = await runAgent(history);
     res.json(result);
-  }),
-);
-
-/**
- * Initiates a connection to the MCP server. If authorization is needed, the
- * response includes `authorizationUrl` for the browser to open.
- */
-app.post(
-  "/api/connect",
-  asyncHandler(async (_req, res) => {
-    const result = await mcpClient.connect();
-    res.json({ ...result, status: mcpClient.status() });
-  }),
-);
-
-app.post(
-  "/api/disconnect",
-  asyncHandler(async (_req, res) => {
-    await mcpClient.disconnect();
-    res.json({ ok: true, status: mcpClient.status() });
-  }),
-);
-
-app.post(
-  "/api/logout",
-  asyncHandler(async (_req, res) => {
-    await mcpClient.logout();
-    res.json({ ok: true, status: mcpClient.status() });
-  }),
-);
-
-app.get(
-  "/api/tools",
-  asyncHandler(async (_req, res) => {
-    const groups = await mcpClient.listTools();
-    res.json({ groups });
-  }),
-);
-
-app.post(
-  "/api/tools/call",
-  asyncHandler(async (req, res) => {
-    const { name, arguments: args } = req.body ?? {};
-    if (typeof name !== "string" || !name) {
-      res.status(400).json({ error: "A tool 'name' is required" });
-      return;
-    }
-    const result = await mcpClient.callTool(
-      name,
-      (args as Record<string, unknown>) ?? {},
-    );
-    res.json({ result });
-  }),
-);
-
-/**
- * OAuth 2.0 redirect endpoint. Adobe IMS redirects the browser here with an
- * authorization `code` after the user grants access. We exchange the code for
- * tokens and establish the authenticated MCP session, then return the user to
- * the app.
- */
-app.get(
-  "/oauth/callback",
-  asyncHandler(async (req, res) => {
-    const code = req.query.code;
-    const oauthError = req.query.error;
-
-    if (typeof oauthError === "string") {
-      const description =
-        typeof req.query.error_description === "string"
-          ? req.query.error_description
-          : "";
-      res.redirect(
-        `/?auth=error&message=${encodeURIComponent(`${oauthError}: ${description}`)}`,
-      );
-      return;
-    }
-
-    if (typeof code !== "string" || !code) {
-      res.redirect(`/?auth=error&message=${encodeURIComponent("Missing authorization code")}`);
-      return;
-    }
-
-    try {
-      await mcpClient.finishAuth(code);
-      res.redirect("/?auth=success");
-    } catch (err) {
-      logger.error("OAuth callback failed", err);
-      res.redirect(
-        `/?auth=error&message=${encodeURIComponent(errorMessage(err))}`,
-      );
-    }
   }),
 );
 
@@ -209,7 +251,8 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
 });
 
 app.listen(config.port, () => {
-  logger.info(`Adobe Target MCP client running at ${config.publicBaseUrl}`);
-  logger.info(`Proxying MCP server: ${config.targetMcpUrl}`);
-  logger.info(`OAuth redirect URL: ${config.redirectUrl}`);
+  logger.info(`Adobe MCP client running at ${config.publicBaseUrl}`);
+  for (const s of config.servers) {
+    logger.info(`  • ${s.label} → ${s.url} (callback ${s.redirectUrl})`);
+  }
 });

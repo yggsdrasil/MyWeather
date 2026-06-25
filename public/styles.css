@@ -141,6 +141,189 @@ body {
   cursor: not-allowed;
 }
 
+/* ---------- Server chips (topbar) ---------- */
+.server-chips {
+  display: flex;
+  gap: 8px;
+}
+.server-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: inherit;
+}
+.server-chip:hover {
+  color: var(--text);
+  border-color: var(--text-dim);
+}
+.server-chip .sdot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  flex: none;
+}
+.server-chip.connected {
+  color: var(--green);
+  border-color: rgba(56, 193, 114, 0.4);
+  background: rgba(56, 193, 114, 0.08);
+}
+.server-chip.connected .sdot {
+  background: var(--green);
+}
+.server-chip.auth .sdot {
+  background: var(--amber);
+}
+
+/* ---------- Server list (welcome + modal) ---------- */
+.server-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 18px 0;
+}
+.server-row {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  background: var(--bg-elevated);
+}
+.server-row-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.server-row-name {
+  font-weight: 600;
+  font-size: 15px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.server-row-name .sdot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--text-dim);
+}
+.server-row-name .sdot.connected {
+  background: var(--green);
+}
+.server-row-name .sdot.auth {
+  background: var(--amber);
+}
+.server-row-url {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text-dim);
+  margin: 6px 0 0;
+  word-break: break-all;
+}
+.server-row-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.server-row-state {
+  font-size: 12px;
+  font-weight: 600;
+}
+.server-row-state.connected {
+  color: var(--green);
+}
+.server-row-state.auth {
+  color: var(--amber);
+}
+.server-row-state.idle {
+  color: var(--text-dim);
+}
+.btn-sm {
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
+/* ---------- Modal ---------- */
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+}
+.modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
+}
+.modal-card {
+  position: relative;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 24px 26px;
+  width: min(560px, 92vw);
+  max-height: 86vh;
+  overflow-y: auto;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.5);
+}
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.modal-head h2 {
+  margin: 0;
+  font-size: 18px;
+}
+.modal-close {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 26px;
+  line-height: 1;
+  cursor: pointer;
+}
+.modal-close:hover {
+  color: var(--text);
+}
+
+/* ---------- Tool server tabs ---------- */
+.tool-server-tabs {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.tool-server-tab {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+.tool-server-tab.active {
+  background: var(--accent-soft);
+  border-color: rgba(250, 15, 0, 0.35);
+  color: #fff;
+}
+.tool-server-tab:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 /* ---------- Badges ---------- */
 .badge {
   font-size: 12px;

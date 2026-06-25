@@ -1,20 +1,29 @@
-# Adobe Target MCP Client
+# Adobe MCP Client
 
-A small full-stack web application that connects to **Adobe Target** through
-Adobe's **Model Context Protocol (MCP)** server
-(`https://targetmcp.adobe.io/mcp`). It acts as an MCP host/client: it handles
-the Adobe IMS OAuth 2.0 authorization flow, discovers the tools the Target MCP
-server exposes, and lets you work with them two ways:
+A small full-stack web application that connects to **Adobe Experience Cloud**
+through Adobe's **Model Context Protocol (MCP)** servers:
+
+- **Adobe Target** — `https://targetmcp.adobe.io/mcp`
+- **Adobe Analytics** — `https://aa-mcp.adobe.io/mcp`
+
+It acts as an MCP host/client: each server is connected independently via the
+Adobe IMS OAuth 2.0 authorization flow, the app discovers the tools each server
+exposes, and lets you work with them two ways:
 
 - **Assistant** — ask in plain language ("which homepage A/B tests are
   winning?") and an AI agent calls the right Target MCP tools, reads the real
   data, and summarizes the answer.
-- **Tools** — browse every tool the server exposes and run any of them manually
-  with a form generated from its schema.
+- **Tools** — browse every tool each connected server exposes and run any of
+  them manually with a form generated from its schema (switch between servers
+  with the tabs at the top of the tool list).
 
-Use it to audit A/B tests, review performance and revenue reports, pull A4T
-(Analytics for Target) data, inspect audiences and offers, and generate QA
-preview URLs — all without writing raw Admin API calls.
+Connect either or both servers. The assistant uses the tools from **all**
+connected servers, so it can answer Target questions, Analytics questions, or
+correlate the two (e.g. tie an experiment to downstream analytics). Use it to
+audit A/B tests, review performance and revenue reports, pull A4T (Analytics for
+Target) data, inspect audiences and offers, generate QA preview URLs, and query
+Analytics report suites, dimensions, metrics, and segments — all without writing
+raw API calls.
 
 ## Example assistant prompts
 
@@ -38,24 +47,27 @@ These prompts also appear as one-click chips in the Assistant tab.
 ## How it works
 
 ```
-Browser UI  ──HTTP──▶  Node/Express server  ──MCP (streamable HTTP + OAuth)──▶  Adobe Target MCP server
-                              │                                                       │
-                              └── Adobe IMS OAuth 2.0 (authorization code + PKCE) ─────┘
+                                          ┌─▶ Adobe Target MCP server
+Browser UI ─HTTP─▶ Node/Express server ─MCP┤
+                         │                 └─▶ Adobe Analytics MCP server
+                         └── Adobe IMS OAuth 2.0 (auth code + PKCE), one session per server
 ```
 
 - The **backend** (`src/server`) uses the official
   [`@modelcontextprotocol/sdk`](https://www.npmjs.com/package/@modelcontextprotocol/sdk)
-  with a `StreamableHTTPClientTransport` to talk to the Target MCP server. A
+  with a `StreamableHTTPClientTransport` per server. Servers are configured as a
+  list (`config.ts`), and `mcpClient.ts` keeps one connection manager per server
+  plus helpers that aggregate/route tool calls across all connected servers. A
   custom `OAuthClientProvider` (`oauthProvider.ts`) drives Adobe IMS OAuth 2.0
-  (dynamic client registration + authorization-code flow with PKCE) and persists
-  tokens to a git-ignored `.data/` folder.
+  (dynamic client registration + authorization-code flow with PKCE) per server
+  and persists tokens to a git-ignored `.data/` folder (one file per server).
 - The **AI assistant** (`src/server/agent.ts`) runs an agentic tool-calling
-  loop: it sends the conversation plus the discovered MCP tools to an LLM
-  (Anthropic Claude or OpenAI / OpenAI-compatible), executes any tool calls the
-  model requests against the Target MCP server, feeds the results back, and
-  repeats until the model produces a final, data-grounded answer. The system
-  prompt instructs it to never fabricate data, resolve names to IDs, and report
-  significance/anomalies.
+  loop: it sends the conversation plus the discovered MCP tools (from every
+  connected server) to an LLM (Anthropic Claude or OpenAI / OpenAI-compatible),
+  executes any tool calls the model requests against the owning MCP server,
+  feeds the results back, and repeats until the model produces a final,
+  data-grounded answer. The system prompt instructs it to never fabricate data,
+  resolve names to IDs, and report significance/anomalies.
 - The **frontend** (`public/`) is a dependency-free single-page UI with an
   Assistant chat view (with a visible tool-call trace) and a Tools browser that
   lists the discovered tools by category, renders a form from each tool's JSON
@@ -68,9 +80,11 @@ only talks to this app's own API.
 ## Prerequisites
 
 - **Node.js 18+** (developed against Node 22).
-- An active **Adobe Target license** (Adobe Experience Cloud subscription) with
-  an Adobe Experience Platform organization.
-- An Adobe user with a Target role assigned in the Adobe Admin Console.
+- An active **Adobe Experience Cloud** subscription with an Adobe Experience
+  Platform organization, and a license for whichever product(s) you connect
+  (Adobe Target and/or Adobe Analytics).
+- An Adobe user with the appropriate product roles in the Adobe Admin Console
+  (e.g. a Target role and/or Analytics report-suite access).
 
 ## Setup
 
@@ -81,12 +95,13 @@ cp .env.example .env   # adjust if needed
 
 Configuration (all optional — sensible defaults are used):
 
-| Variable          | Default                          | Description                                            |
-| ----------------- | -------------------------------- | ------------------------------------------------------ |
-| `PORT`            | `4321`                           | Port the app listens on.                               |
-| `PUBLIC_BASE_URL` | `http://localhost:4321`          | Base URL the browser uses; the OAuth redirect is `${PUBLIC_BASE_URL}/oauth/callback`. |
-| `TARGET_MCP_URL`  | `https://targetmcp.adobe.io/mcp` | Adobe Target MCP server endpoint.                      |
-| `DATA_DIR`        | `.data`                          | Where OAuth tokens & client registration are stored.   |
+| Variable            | Default                          | Description                                            |
+| ------------------- | -------------------------------- | ------------------------------------------------------ |
+| `PORT`              | `4321`                           | Port the app listens on.                               |
+| `PUBLIC_BASE_URL`   | `http://localhost:4321`          | Base URL the browser uses; each server's OAuth redirect is `${PUBLIC_BASE_URL}/oauth/callback/<id>`. |
+| `TARGET_MCP_URL`    | `https://targetmcp.adobe.io/mcp` | Adobe Target MCP server endpoint (set to `off` to hide it). |
+| `ANALYTICS_MCP_URL` | `https://aa-mcp.adobe.io/mcp`    | Adobe Analytics MCP server endpoint (set to `off` to hide it). |
+| `DATA_DIR`          | `.data`                          | Where OAuth tokens & client registration are stored (one file per server). |
 
 ### Enabling the AI assistant (optional)
 
@@ -106,7 +121,7 @@ Optional overrides: `LLM_PROVIDER` (`anthropic` | `openai`), `LLM_MODEL`
 (Anthropic default `claude-sonnet-4-6`; also `claude-opus-4-8`,
 `claude-haiku-4-5`. OpenAI default `gpt-4o`), `LLM_BASE_URL` (for
 OpenAI-compatible/proxy endpoints), `LLM_MAX_STEPS`, `LLM_MAX_TOKENS`. See
-`.env.example`. Your prompts and the Target data the tools
+`.env.example`. Your prompts and the Target/Analytics data the tools
 return are sent to the configured LLM provider, so use a key/model you're
 comfortable sharing that data with.
 
@@ -127,31 +142,39 @@ npm start
 
 Then open <http://localhost:4321> and:
 
-1. Click **Connect**.
+1. Connect a server: click **Connect** next to **Adobe Target** and/or **Adobe
+   Analytics** (also available any time via the **Connections** button in the
+   top bar).
 2. A new tab opens for the **Adobe IMS** login. Sign in and select your
-   organization. You are redirected back to the app at `/oauth/callback`.
-3. Once connected:
+   organization. You are redirected back at `/oauth/callback/<server>`. Repeat
+   for the second server if you want both.
+3. Once at least one server is connected:
    - **Assistant tab** (if an LLM key is configured): ask a question or click an
-     example prompt; the agent calls the right tools and summarizes the answer.
-     Expand the tool-call trace under any reply to see exactly what it ran.
-   - **Tools tab**: browse the tools the server exposes (activities, reporting,
-     audiences, offers, previews, and more), fill in parameters, and **Run tool**.
+     example prompt; the agent calls the right tools across all connected servers
+     and summarizes the answer. Expand the tool-call trace under any reply to see
+     exactly what it ran.
+   - **Tools tab**: browse the tools each server exposes (use the server tabs at
+     the top of the list when both are connected), fill in parameters, and
+     **Run tool**.
 
 ## API (backend)
 
 The frontend talks to these endpoints; they are also usable directly:
 
-| Method & path          | Purpose                                                              |
-| ---------------------- | -------------------------------------------------------------------- |
-| `GET  /api/status`       | Connection + credential status.                                    |
-| `POST /api/connect`      | Connect; returns `{ authorizationUrl }` when OAuth is required.    |
-| `GET  /oauth/callback`   | OAuth 2.0 redirect target; exchanges the code and connects.        |
-| `GET  /api/tools`        | Discovered tools grouped by category.                              |
-| `POST /api/tools/call`   | Run a tool: `{ "name": "...", "arguments": { ... } }`.             |
-| `GET  /api/agent/status` | Whether the AI assistant is configured (provider/model).          |
-| `POST /api/chat`         | Run the assistant: `{ "messages": [{ "role": "user", "content": "…" }] }` → `{ reply, steps }`. |
-| `POST /api/disconnect`   | Close the MCP session (keeps credentials).                         |
-| `POST /api/logout`       | Close the session and clear stored credentials.                    |
+Server ids are `target` and `analytics`.
+
+| Method & path                       | Purpose                                                              |
+| ----------------------------------- | -------------------------------------------------------------------- |
+| `GET  /api/servers`                 | Status of all configured servers (connected, credentials, tool count). |
+| `GET  /api/config`                  | Configured servers (id, label, url).                                 |
+| `POST /api/servers/:id/connect`     | Connect a server; returns `{ authorizationUrl }` when OAuth is required. |
+| `GET  /oauth/callback/:id`          | OAuth 2.0 redirect target for a server; exchanges the code and connects. |
+| `GET  /api/servers/:id/tools`       | A server's discovered tools grouped by category.                     |
+| `POST /api/servers/:id/tools/call`  | Run a tool on a server: `{ "name": "...", "arguments": { ... } }`.   |
+| `POST /api/servers/:id/disconnect`  | Close a server's MCP session (keeps credentials).                    |
+| `POST /api/servers/:id/logout`      | Close a server's session and clear its stored credentials.           |
+| `GET  /api/agent/status`            | Whether the AI assistant is configured (provider/model).             |
+| `POST /api/chat`                    | Run the assistant across all connected servers: `{ "messages": [...] }` → `{ reply, steps }`. |
 
 ## Project layout
 
@@ -159,12 +182,12 @@ The frontend talks to these endpoints; they are also usable directly:
 src/server/
   config.ts         Environment-driven configuration
   logger.ts         Minimal structured logger
-  tokenStore.ts     JSON-file persistence for OAuth artifacts
-  oauthProvider.ts  Adobe IMS OAuthClientProvider implementation
-  mcpClient.ts      MCP connection lifecycle + tool discovery/calls
+  tokenStore.ts     Per-server JSON-file persistence for OAuth artifacts
+  oauthProvider.ts  Adobe IMS OAuthClientProvider (one instance per server)
+  mcpClient.ts      Per-server connection managers + cross-server tool aggregation
   agent.ts          AI assistant: agentic tool-calling loop (Anthropic/OpenAI)
-  toolCatalog.ts    Categorizes tools for display
-  index.ts          Express server, REST API, OAuth callback, static hosting
+  toolCatalog.ts    Categorizes Target & Analytics tools for display
+  index.ts          Express server, REST API, per-server OAuth callback, static hosting
 public/
   index.html, styles.css, app.js   The web UI (Assistant + Tools views)
 scripts/
@@ -183,9 +206,9 @@ tool call is executed and the final answer is grounded in the tool's data.
 
 ## Security notes
 
-- OAuth tokens and the dynamically-registered client are written to
-  `DATA_DIR` (`.data/auth.json`, file mode `600`) and are **git-ignored**. Treat
-  that folder as a secret.
+- OAuth tokens and the dynamically-registered client are written per server to
+  `DATA_DIR` (`.data/auth-target.json`, `.data/auth-analytics.json`, file mode
+  `600`) and are **git-ignored**. Treat that folder as a secret.
 - Adobe IMS validates tokens on every request; the MCP server does not store
   them persistently. All access is constrained to what your Adobe account is
   permitted to view or modify.

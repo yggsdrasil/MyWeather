@@ -1,9 +1,9 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
-import { config } from "./config.js";
+import { config, type McpServerConfig } from "./config.js";
 import { logger } from "./logger.js";
-import { AdobeTargetOAuthProvider } from "./oauthProvider.js";
+import { AdobeImsOAuthProvider } from "./oauthProvider.js";
 import { categorizeTool, CATEGORIES, type ToolCategory } from "./toolCatalog.js";
 
 export interface ConnectResult {
@@ -13,6 +13,8 @@ export interface ConnectResult {
 }
 
 export interface ConnectionStatus {
+  id: string;
+  label: string;
   connected: boolean;
   hasCredentials: boolean;
   serverUrl: string;
@@ -32,33 +34,51 @@ export interface ToolCatalogGroup {
   tools: CatalogTool[];
 }
 
+export interface RawTool {
+  name: string;
+  description: string;
+  inputSchema: unknown;
+}
+
 const CLIENT_INFO = {
-  name: "adobe-target-mcp-client",
+  name: "adobe-mcp-client",
   version: "1.0.0",
 };
 
 /** Thrown for expected "you must connect first" conditions (HTTP 409). */
 export class ConnectionRequiredError extends Error {
-  constructor(message = "Not connected to the Adobe Target MCP server") {
+  constructor(message = "Not connected to this Adobe MCP server") {
     super(message);
     this.name = "ConnectionRequiredError";
   }
 }
 
 /**
- * Manages a single long-lived connection to the Adobe Target MCP server,
- * including the OAuth authorization lifecycle.
+ * Manages a single long-lived connection to one Adobe MCP server (Target,
+ * Analytics, …), including the OAuth authorization lifecycle.
  */
-class McpClientManager {
-  private readonly authProvider = new AdobeTargetOAuthProvider();
+export class McpClientManager {
+  readonly id: string;
+  readonly label: string;
+  private readonly authProvider: AdobeImsOAuthProvider;
   private client: Client | undefined;
   private transport: StreamableHTTPClientTransport | undefined;
   private connected = false;
   private serverInfo: { name?: string; version?: string } | undefined;
   private cachedToolCount: number | undefined;
 
+  constructor(private readonly server: McpServerConfig) {
+    this.id = server.id;
+    this.label = server.label;
+    this.authProvider = new AdobeImsOAuthProvider(server);
+  }
+
+  get isConnected(): boolean {
+    return this.connected;
+  }
+
   private buildTransport(): StreamableHTTPClientTransport {
-    return new StreamableHTTPClientTransport(new URL(config.targetMcpUrl), {
+    return new StreamableHTTPClientTransport(new URL(this.server.url), {
       authProvider: this.authProvider,
     });
   }
@@ -80,14 +100,14 @@ class McpClientManager {
       await this.client.connect(this.transport);
       this.connected = true;
       this.serverInfo = this.client.getServerVersion();
-      logger.info("Connected to Adobe Target MCP server", this.serverInfo);
+      logger.info(`[${this.id}] Connected to ${this.label} MCP server`, this.serverInfo);
       await this.refreshToolCount();
       return { connected: true };
     } catch (err) {
       if (err instanceof UnauthorizedError) {
         const authUrl = this.authProvider.pendingAuthorizationUrl;
         if (authUrl) {
-          logger.info("OAuth authorization required to continue");
+          logger.info(`[${this.id}] OAuth authorization required to continue`);
           return { connected: false, authorizationUrl: authUrl.toString() };
         }
       }
@@ -107,7 +127,7 @@ class McpClientManager {
       this.transport = this.buildTransport();
     }
     await this.transport.finishAuth(authorizationCode);
-    logger.info("OAuth token exchange completed");
+    logger.info(`[${this.id}] OAuth token exchange completed`);
 
     // Establish a fresh authenticated session now that tokens are stored.
     this.connected = false;
@@ -121,21 +141,21 @@ class McpClientManager {
       const { tools } = await this.requireClient().listTools();
       this.cachedToolCount = tools.length;
     } catch (err) {
-      logger.warn("Unable to pre-fetch tool count", err);
+      logger.warn(`[${this.id}] Unable to pre-fetch tool count`, err);
     }
   }
 
   private requireClient(): Client {
     if (!this.client || !this.connected) {
-      throw new ConnectionRequiredError();
+      throw new ConnectionRequiredError(
+        `Not connected to the ${this.label} MCP server`,
+      );
     }
     return this.client;
   }
 
-  /** Returns the raw, flat tool list (name/description/inputSchema) for the agent. */
-  async getRawTools(): Promise<
-    Array<{ name: string; description: string; inputSchema: unknown }>
-  > {
+  /** Returns the raw, flat tool list (name/description/inputSchema). */
+  async getRawTools(): Promise<RawTool[]> {
     const { tools } = await this.requireClient().listTools();
     this.cachedToolCount = tools.length;
     return tools.map((t) => ({
@@ -146,15 +166,14 @@ class McpClientManager {
   }
 
   async listTools(): Promise<ToolCatalogGroup[]> {
-    const { tools } = await this.requireClient().listTools();
-    this.cachedToolCount = tools.length;
+    const tools = await this.getRawTools();
 
     const grouped = new Map<string, CatalogTool[]>();
     for (const tool of tools) {
       const category = categorizeTool(tool.name);
       const entry: CatalogTool = {
         name: tool.name,
-        description: tool.description ?? "",
+        description: tool.description,
         inputSchema: tool.inputSchema,
         category,
       };
@@ -175,11 +194,7 @@ class McpClientManager {
     name: string,
     args: Record<string, unknown>,
   ): Promise<unknown> {
-    const result = await this.requireClient().callTool({
-      name,
-      arguments: args,
-    });
-    return result;
+    return this.requireClient().callTool({ name, arguments: args });
   }
 
   async disconnect(): Promise<void> {
@@ -187,7 +202,7 @@ class McpClientManager {
       try {
         await this.transport.close();
       } catch (err) {
-        logger.warn("Error while closing transport", err);
+        logger.warn(`[${this.id}] Error while closing transport`, err);
       }
     }
     this.client = undefined;
@@ -205,13 +220,116 @@ class McpClientManager {
 
   status(): ConnectionStatus {
     return {
+      id: this.id,
+      label: this.label,
       connected: this.connected,
       hasCredentials: this.authProvider.hasTokens(),
-      serverUrl: config.targetMcpUrl,
+      serverUrl: this.server.url,
       serverInfo: this.serverInfo,
       toolCount: this.cachedToolCount,
     };
   }
 }
 
-export const mcpClient = new McpClientManager();
+// ---------------------------------------------------------------------------
+// Registry of all configured servers
+// ---------------------------------------------------------------------------
+
+const managers = new Map<string, McpClientManager>();
+for (const server of config.servers) {
+  managers.set(server.id, new McpClientManager(server));
+}
+
+export function getManager(id: string): McpClientManager | undefined {
+  return managers.get(id);
+}
+
+export function allManagers(): McpClientManager[] {
+  return Array.from(managers.values());
+}
+
+export function connectedManagers(): McpClientManager[] {
+  return allManagers().filter((m) => m.isConnected);
+}
+
+export function allStatuses(): ConnectionStatus[] {
+  return allManagers().map((m) => m.status());
+}
+
+// ---------------------------------------------------------------------------
+// Cross-server tool aggregation (used by the AI assistant)
+// ---------------------------------------------------------------------------
+
+interface ToolRoute {
+  managerId: string;
+  originalName: string;
+}
+
+/** Maps the (possibly namespaced) tool name exposed to the LLM back to a server. */
+let toolRouting = new Map<string, ToolRoute>();
+
+/**
+ * Aggregates tools from every connected server. Tool names are normally kept
+ * as-is; on a name collision across servers, later ones are namespaced with
+ * their server tag (e.g. `analytics__get_report`).
+ */
+export async function aggregatedTools(): Promise<RawTool[]> {
+  const routing = new Map<string, ToolRoute>();
+  const seen = new Set<string>();
+  const out: RawTool[] = [];
+
+  for (const manager of connectedManagers()) {
+    let tools: RawTool[];
+    try {
+      tools = await manager.getRawTools();
+    } catch (err) {
+      logger.warn(`[${manager.id}] Failed to list tools for assistant`, err);
+      continue;
+    }
+    for (const tool of tools) {
+      const exposedName = seen.has(tool.name)
+        ? `${manager.id}__${tool.name}`
+        : tool.name;
+      seen.add(exposedName);
+      routing.set(exposedName, { managerId: manager.id, originalName: tool.name });
+      out.push({
+        name: exposedName,
+        description: `[${manager.label}] ${tool.description}`.trim(),
+        inputSchema: tool.inputSchema,
+      });
+    }
+  }
+
+  toolRouting = routing;
+  return out;
+}
+
+/** Calls an aggregated (possibly namespaced) tool on its owning server. */
+export async function callAggregatedTool(
+  name: string,
+  args: Record<string, unknown>,
+): Promise<unknown> {
+  const route = toolRouting.get(name);
+  if (route) {
+    const manager = getManager(route.managerId);
+    if (!manager) throw new Error(`Unknown MCP server: ${route.managerId}`);
+    return manager.callTool(route.originalName, args);
+  }
+
+  // Fallbacks: strip a "<serverId>__" prefix, or search connected servers.
+  for (const manager of connectedManagers()) {
+    const prefix = `${manager.id}__`;
+    if (name.startsWith(prefix)) {
+      return manager.callTool(name.slice(prefix.length), args);
+    }
+  }
+  for (const manager of connectedManagers()) {
+    try {
+      return await manager.callTool(name, args);
+    } catch (err) {
+      if (err instanceof ConnectionRequiredError) continue;
+      throw err;
+    }
+  }
+  throw new Error(`No connected server exposes a tool named "${name}"`);
+}

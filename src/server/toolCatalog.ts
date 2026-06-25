@@ -24,6 +24,12 @@ export const CATEGORIES: Record<string, ToolCategory> = {
   revision: { id: "revision", label: "Revisions", order: 9 },
   template: { id: "template", label: "Templates", order: 10 },
   implementation: { id: "implementation", label: "Implementation", order: 11 },
+  // Adobe Analytics categories
+  reportsuite: { id: "reportsuite", label: "Report Suites", order: 12 },
+  dimension: { id: "dimension", label: "Dimensions", order: 13 },
+  metric: { id: "metric", label: "Metrics", order: 14 },
+  segment: { id: "segment", label: "Segments", order: 15 },
+  report: { id: "report", label: "Reports & Queries", order: 16 },
   other: { id: "other", label: "Other", order: 99 },
 };
 
@@ -54,8 +60,15 @@ const KNOWN_TOOL_CATEGORY: Record<string, string> = {
 };
 
 const HEURISTICS: Array<[RegExp, string]> = [
+  // Adobe Analytics (checked first so e.g. "report_suite" wins over "report")
+  [/report_?suite|rsid|suite/i, "reportsuite"],
+  [/dimension/i, "dimension"],
+  [/\bmetric|calculated_metric|measure/i, "metric"],
+  [/segment/i, "segment"],
+  [/freeform|ranked|trended|run_report|query|breakdown|data_warehouse|cja/i, "report"],
+  // Adobe Target
   [/activity|activities|experience/i, "activity"],
-  [/report|performance|orders|analytics/i, "reporting"],
+  [/performance|orders/i, "reporting"],
   [/audience/i, "audience"],
   [/offer/i, "offer"],
   [/recommendation|criteria|catalog/i, "recommendations"],
@@ -65,6 +78,7 @@ const HEURISTICS: Array<[RegExp, string]> = [
   [/revision/i, "revision"],
   [/template/i, "template"],
   [/response_token|implementation|setting|config/i, "implementation"],
+  [/report|analytics/i, "report"],
 ];
 
 export function categorizeTool(toolName: string): ToolCategory {
