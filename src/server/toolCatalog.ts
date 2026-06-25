@@ -30,6 +30,14 @@ export const CATEGORIES: Record<string, ToolCategory> = {
   metric: { id: "metric", label: "Metrics", order: 14 },
   segment: { id: "segment", label: "Segments", order: 15 },
   report: { id: "report", label: "Reports & Queries", order: 16 },
+  // Adobe Launch / Data Collection (Tags) categories
+  launchProperty: { id: "launchProperty", label: "Launch Properties", order: 20 },
+  rule: { id: "rule", label: "Rules", order: 21 },
+  dataElement: { id: "dataElement", label: "Data Elements", order: 22 },
+  extension: { id: "extension", label: "Extensions", order: 23 },
+  environment: { id: "environment", label: "Environments", order: 24 },
+  library: { id: "library", label: "Libraries & Builds", order: 25 },
+  hostAdapter: { id: "hostAdapter", label: "Hosts & Adapters", order: 26 },
   other: { id: "other", label: "Other", order: 99 },
 };
 
@@ -60,6 +68,15 @@ const KNOWN_TOOL_CATEGORY: Record<string, string> = {
 };
 
 const HEURISTICS: Array<[RegExp, string]> = [
+  // Adobe Launch / Data Collection (Tags) — checked early so e.g. "data_element"
+  // and "rule_component" don't get mis-bucketed.
+  [/data_?element/i, "dataElement"],
+  [/\brule/i, "rule"],
+  [/extension/i, "extension"],
+  [/environment/i, "environment"],
+  [/librar|\bbuild|publish/i, "library"],
+  [/\bhost|adapter/i, "hostAdapter"],
+  [/launch_?propert|tags?_propert/i, "launchProperty"],
   // Adobe Analytics (checked first so e.g. "report_suite" wins over "report")
   [/report_?suite|rsid|suite/i, "reportsuite"],
   [/dimension/i, "dimension"],

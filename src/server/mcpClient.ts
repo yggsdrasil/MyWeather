@@ -112,8 +112,30 @@ export class McpClientManager {
         }
       }
       this.connected = false;
-      throw err;
+      throw this.friendlyConnectError(err);
     }
+  }
+
+  /** Wraps low-level network errors with a clearer, server-scoped message. */
+  private friendlyConnectError(err: unknown): Error {
+    const msg = err instanceof Error ? err.message : String(err);
+    const cause =
+      err instanceof Error && err.cause
+        ? String((err.cause as { code?: string }).code ?? err.cause)
+        : "";
+    const unreachable =
+      /fetch failed|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|getaddrinfo|certificate/i.test(
+        `${msg} ${cause}`,
+      );
+    if (unreachable) {
+      return new Error(
+        `Could not reach the ${this.label} MCP server at ${this.server.url}. ` +
+          `The endpoint may not be available yet — set its URL via an env var ` +
+          `(e.g. LAUNCH_MCP_URL) to the correct address, or set it to "off" to hide it. ` +
+          `(${cause || msg})`,
+      );
+    }
+    return err instanceof Error ? err : new Error(msg);
   }
 
   /**

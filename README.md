@@ -5,6 +5,8 @@ through Adobe's **Model Context Protocol (MCP)** servers:
 
 - **Adobe Target** — `https://targetmcp.adobe.io/mcp`
 - **Adobe Analytics** — `https://aa-mcp.adobe.io/mcp`
+- **Adobe Launch** (Experience Platform Data Collection / Tags) — endpoint set
+  via `LAUNCH_MCP_URL` (see note below)
 
 It acts as an MCP host/client: each server is connected independently via the
 Adobe IMS OAuth 2.0 authorization flow, the app discovers the tools each server
@@ -18,13 +20,23 @@ exposes, and lets you work with them two ways:
   them manually with a form generated from its schema (switch between servers
   with the tabs at the top of the tool list).
 
-Connect either or both servers. The assistant uses the tools from **all**
-connected servers, so it can answer Target questions, Analytics questions, or
-correlate the two (e.g. tie an experiment to downstream analytics). Use it to
-audit A/B tests, review performance and revenue reports, pull A4T (Analytics for
-Target) data, inspect audiences and offers, generate QA preview URLs, and query
-Analytics report suites, dimensions, metrics, and segments — all without writing
-raw API calls.
+Connect any combination of servers. The assistant uses the tools from **all**
+connected servers, so it can answer Target questions, Analytics questions,
+Launch (tag implementation) questions, or correlate them (e.g. tie an experiment
+to downstream analytics, or check that a Launch rule fires the right calls). Use
+it to audit A/B tests, review performance and revenue reports, pull A4T
+(Analytics for Target) data, inspect audiences and offers, generate QA preview
+URLs, query Analytics report suites/dimensions/metrics/segments, and inspect
+Launch properties, rules, data elements, extensions, and libraries — all without
+writing raw API calls.
+
+> **Adobe Launch endpoint:** Adobe has not yet published a public hosted Launch
+> (Data Collection / Tags) MCP server. The Launch tile appears in the app, but it
+> will only connect once you point `LAUNCH_MCP_URL` at a real endpoint — the
+> official one when Adobe ships it, or your own / App Builder Launch MCP server.
+> Until then, clicking **Connect** on Launch returns a clear "endpoint not
+> reachable" message. Set `LAUNCH_MCP_URL=off` to hide it. Everything else works
+> identically to Target and Analytics.
 
 ## Example assistant prompts
 
@@ -49,10 +61,15 @@ These prompts also appear as one-click chips in the Assistant tab.
 
 ```
                                           ┌─▶ Adobe Target MCP server
-Browser UI ─HTTP─▶ Node/Express server ─MCP┤
-                         │                 └─▶ Adobe Analytics MCP server
-                         └── Adobe IMS OAuth 2.0 (auth code + PKCE), one session per server
+Browser UI ─HTTP─▶ Node/Express server ─MCP┼─▶ Adobe Analytics MCP server
+                         │                 └─▶ Adobe Launch MCP server (when configured)
+                         ├── Adobe IMS OAuth 2.0 (auth code + PKCE), one session per server
+                         └── LLM (Anthropic / OpenAI) for the assistant
 ```
+
+Adding more Adobe MCP servers (CJA, Real-Time CDP, AEM, …) is a one-line change
+in `config.ts` — the connection lifecycle, OAuth, tool browser, and assistant
+are all server-agnostic.
 
 - The **backend** (`src/server`) uses the official
   [`@modelcontextprotocol/sdk`](https://www.npmjs.com/package/@modelcontextprotocol/sdk)
@@ -102,6 +119,7 @@ Configuration (all optional — sensible defaults are used):
 | `PUBLIC_BASE_URL`   | `http://localhost:4321`          | Base URL the browser uses; each server's OAuth redirect is `${PUBLIC_BASE_URL}/oauth/callback/<id>`. |
 | `TARGET_MCP_URL`    | `https://targetmcp.adobe.io/mcp` | Adobe Target MCP server endpoint (set to `off` to hide it). |
 | `ANALYTICS_MCP_URL` | `https://aa-mcp.adobe.io/mcp`    | Adobe Analytics MCP server endpoint (set to `off` to hide it). |
+| `LAUNCH_MCP_URL`    | `https://launch-mcp.adobe.io/mcp` | Adobe Launch (Data Collection / Tags) MCP endpoint. Placeholder default — set to the real endpoint when available, or `off` to hide. |
 | `DATA_DIR`          | `.data`                          | Where OAuth tokens & client registration are stored (one file per server). |
 
 ### Enabling the AI assistant (optional)
@@ -151,9 +169,10 @@ npm start
 
 Then open <http://localhost:4321> and:
 
-1. Connect a server: click **Connect** next to **Adobe Target** and/or **Adobe
-   Analytics** (also available any time via the **Connections** button in the
-   top bar).
+1. Connect a server: click **Connect** next to **Adobe Target**, **Adobe
+   Analytics**, and/or **Adobe Launch** (also available any time via the
+   **Connections** button in the top bar). Launch requires `LAUNCH_MCP_URL` to
+   point at a reachable endpoint (see the note above).
 2. A new tab opens for the **Adobe IMS** login. Sign in and select your
    organization. You are redirected back at `/oauth/callback/<server>`. Repeat
    for the second server if you want both.

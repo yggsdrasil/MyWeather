@@ -74,6 +74,17 @@ function resolveServers(): McpServerConfig[] {
       shortTag: "analytics",
       url: process.env.ANALYTICS_MCP_URL ?? "https://aa-mcp.adobe.io/mcp",
     },
+    {
+      id: "launch",
+      label: "Adobe Launch",
+      shortTag: "launch",
+      // Adobe Launch = Adobe Experience Platform Data Collection (Tags).
+      // Adobe has not published a public hosted Launch MCP endpoint yet, so this
+      // is a best-guess following Adobe's naming convention. Override it with
+      // LAUNCH_MCP_URL once the official endpoint is available (or point it at
+      // your own / App Builder Launch MCP server), or set it to "off" to hide.
+      url: process.env.LAUNCH_MCP_URL ?? "https://launch-mcp.adobe.io/mcp",
+    },
   ];
 
   return defs
